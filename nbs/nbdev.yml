@@ -1,0 +1,9 @@
+project:
+  output-dir: _docs
+
+website:
+  title: "fastermodels"
+  site-url: "https://FasterAI-Labs.github.io/fastermodels"
+  description: ""
+  repo-branch: main
+  repo-url: "https://github.com/FasterAI-Labs/fastermodels"

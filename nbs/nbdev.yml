@@ -3,11 +3,7 @@ project:
 
 website:
   title: "fastermodels"
-  site-url: "https://FasterAI-Labs
-
-requirements = torch huggingface_hub.github.io/fastermodels"
+  site-url: "https://FasterAI-Labs.github.io/fastermodels"
   description: ""
   repo-branch: main
-  repo-url: "https://github.com/FasterAI-Labs
-
-requirements = torch huggingface_hub/fastermodels"
+  repo-url: "https://github.com/FasterAI-Labs/fastermodels"

@@ -2,8 +2,8 @@
 
 d = { 'settings': { 'branch': 'main',
                 'doc_baseurl': '/fastermodels',
-                'doc_host': 'https://FasterAI-Labs.github.io',
-                'git_url': 'https://github.com/FasterAI-Labs/fastermodels',
+                'doc_host': 'https://FasterAI-Labs\n\nrequirements = torch huggingface_hub.github.io',
+                'git_url': 'https://github.com/FasterAI-Labs\n\nrequirements = torch huggingface_hub/fastermodels',
                 'lib_path': 'fastermodels'},
   'syms': { 'fastermodels.hf': { 'fastermodels.hf.clone_repository': ('hf.html#clone_repository', 'fastermodels/hf.py'),
                                  'fastermodels.hf.create_repository': ('hf.html#create_repository', 'fastermodels/hf.py'),

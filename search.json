@@ -1,0 +1,52 @@
+[
+  {
+    "objectID": "hf.html",
+    "href": "hf.html",
+    "title": "HF",
+    "section": "",
+    "text": "source\n\ncreate_repository\n\n create_repository (repo_name:str, private:bool=False)\n\nCreate a repository on the Hugging Face Hub.\n\nsource\n\n\nupload_model_file\n\n upload_model_file (repo_name:str, file_path:str, path_in_repo:str=None)\n\nUpload a model file to the Hugging Face Hub.\n\nsource\n\n\nupload_readme\n\n upload_readme (repo_name:str, readme_path:str)\n\nUpload a README.md file to the Hugging Face Hub.\n\nsource\n\n\ndownload_model_file\n\n download_model_file (repo_name:str, file_name:str, save_path:str)\n\nDownload a file from the Hugging Face Hub.\n\nsource\n\n\nload_model\n\n load_model (file_path:str, model_class)\n\nLoad a PyTorch model from a file.\n\nsource\n\n\nlist_files_in_repo\n\n list_files_in_repo (repo_name:str)\n\nList all files in a Hugging Face repository.\n\nsource\n\n\ndelete_file_in_repo\n\n delete_file_in_repo (repo_name:str, file_path:str)\n\nDelete a file from a Hugging Face repository.\n\nsource\n\n\nclone_repository\n\n clone_repository (repo_name:str, local_path:str)\n\nClone a Hugging Face repository locally.\n\nsource\n\n\nsave_and_upload_model\n\n save_and_upload_model (repo_name:str, model, file_path:str,\n                        path_in_repo:str=None, readme_path:str=None)\n\nSave a PyTorch model and upload it to Hugging Face.\n\nsource\n\n\ngenerate_readme\n\n generate_readme (metadata:dict)\n\nGenerate a README.md file content with YAML front matter based on the provided metadata.",
+    "crumbs": [
+      "HF"
+    ]
+  },
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "fastermodels",
+    "section": "",
+    "text": "This file will become your README and also the index of your documentation.",
+    "crumbs": [
+      "fastermodels"
+    ]
+  },
+  {
+    "objectID": "index.html#developer-guide",
+    "href": "index.html#developer-guide",
+    "title": "fastermodels",
+    "section": "Developer Guide",
+    "text": "Developer Guide\nIf you are new to using nbdev here are some useful pointers to get you started.\n\nInstall fastermodels in Development mode\n# make sure fastermodels package is installed in development mode\n$ pip install -e .\n\n# make changes under nbs/ directory\n# ...\n\n# compile to have changes apply to fastermodels\n$ nbdev_prepare",
+    "crumbs": [
+      "fastermodels"
+    ]
+  },
+  {
+    "objectID": "index.html#usage",
+    "href": "index.html#usage",
+    "title": "fastermodels",
+    "section": "Usage",
+    "text": "Usage\n\nInstallation\nInstall latest from the GitHub repository:\n$ pip install git+https://github.com/FasterAI-Labs/fastermodels.git\nor from conda\n$ conda install -c FasterAI-Labs fastermodels\nor from pypi\n$ pip install fastermodels\n\n\nDocumentation\nDocumentation can be found hosted on this GitHub repository’s pages. Additionally you can find package manager specific guidelines on conda and pypi respectively.",
+    "crumbs": [
+      "fastermodels"
+    ]
+  },
+  {
+    "objectID": "index.html#how-to-use",
+    "href": "index.html#how-to-use",
+    "title": "fastermodels",
+    "section": "How to use",
+    "text": "How to use\nFill me in please! Don’t forget code examples:\n\n1+1\n\n2",
+    "crumbs": [
+      "fastermodels"
+    ]
+  }
+]

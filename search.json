@@ -1,0 +1,92 @@
+[
+  {
+    "objectID": "hf.html",
+    "href": "hf.html",
+    "title": "HF",
+    "section": "",
+    "text": "source\n\ncreate_repository\n\n create_repository (repo_name:str, private:bool=False)\n\nCreate a repository on the Hugging Face Hub.\n\nsource\n\n\nupload_model_file\n\n upload_model_file (repo_name:str, file_path:str, path_in_repo:str=None)\n\nUpload a model file to the Hugging Face Hub.\n\nsource\n\n\nupload_readme\n\n upload_readme (repo_name:str, readme_path:str)\n\nUpload a README.md file to the Hugging Face Hub.\n\nsource\n\n\ndownload_model_file\n\n download_model_file (repo_name:str, file_name:str, save_path:str)\n\nDownload a file from the Hugging Face Hub.\n\nsource\n\n\nload_model\n\n load_model (file_path:str, model_class)\n\nLoad a PyTorch model from a file.\n\nsource\n\n\nlist_files_in_repo\n\n list_files_in_repo (repo_name:str)\n\nList all files in a Hugging Face repository.\n\nsource\n\n\ndelete_file_in_repo\n\n delete_file_in_repo (repo_name:str, file_path:str)\n\nDelete a file from a Hugging Face repository.\n\nsource\n\n\nclone_repository\n\n clone_repository (repo_name:str, local_path:str)\n\nClone a Hugging Face repository locally.\n\nsource\n\n\nsave_and_upload_model\n\n save_and_upload_model (repo_name:str, model, file_path:str,\n                        path_in_repo:str=None, readme_path:str=None)\n\nSave a PyTorch model and upload it to Hugging Face.\n\nsource\n\n\ngenerate_readme\n\n generate_readme (metadata:dict)\n\nGenerate a README.md file content with YAML front matter based on the provided metadata.",
+    "crumbs": [
+      "HF"
+    ]
+  },
+  {
+    "objectID": "tutorial.usage.html",
+    "href": "tutorial.usage.html",
+    "title": "Usage",
+    "section": "",
+    "text": "from fastermodels.hf import *\nfrom fastai.vision.all import *\nfrom fastai.callback.all import *\nfrom fasterai.core.criteria import *\nimport torch_pruning as tp\nfrom torch_pruning.pruner import function\nfrom torch_pruning.pruner.algorithms.scheduler import linear_scheduler\nimport timm\n\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\n\nfrom fasterbench.benchmark import *\nfrom fasterai.prune.all import *\nhf_model_name = 'tutorial'\nmodel_name = 'alexnet'",
+    "crumbs": [
+      "Usage"
+    ]
+  },
+  {
+    "objectID": "tutorial.usage.html#get-a-model",
+    "href": "tutorial.usage.html#get-a-model",
+    "title": "Usage",
+    "section": "Get a model",
+    "text": "Get a model\n\nmodel = globals()[model_name]()\nmodel_size = get_model_size(model)\n\n\ndef get_dls(size, bs):\n    path = URLs.IMAGENETTE_160\n    source = untar_data(path)\n    blocks=(ImageBlock, CategoryBlock)\n    tfms = [RandomResizedCrop(size, min_scale=0.35), FlipItem(0.5)]\n    batch_tfms = [Normalize.from_stats(*imagenet_stats)]\n\n    csv_file = 'noisy_imagenette.csv'\n    inp = pd.read_csv(source/csv_file)\n    dblock = DataBlock(blocks=blocks,\n               splitter=ColSplitter(),\n               get_x=ColReader('path', pref=source),\n               get_y=ColReader(f'noisy_labels_0'),\n               item_tfms=tfms,\n               batch_tfms=batch_tfms)\n\n    return dblock.dataloaders(inp, path=source, bs=bs)\n\n\ndls = get_dls(160, 32)\nlearn = Learner(dls, model, metrics = [accuracy])\nlearn.fit_one_cycle(5)\n\n\n\n\n\n\n\n\nepoch\ntrain_loss\nvalid_loss\naccuracy\ntime\n\n\n\n\n0\n2.190084\n2.294868\n0.154650\n00:05\n\n\n1\n1.957930\n1.917212\n0.328153\n00:05\n\n\n2\n1.689020\n1.605206\n0.442293\n00:05\n\n\n3\n1.430839\n1.361510\n0.538344\n00:05\n\n\n4\n1.343451\n1.291558\n0.572994\n00:05\n\n\n\n\n\n\nloss, acc = learn.validate()",
+    "crumbs": [
+      "Usage"
+    ]
+  },
+  {
+    "objectID": "tutorial.usage.html#upload-the-model",
+    "href": "tutorial.usage.html#upload-the-model",
+    "title": "Usage",
+    "section": "Upload the model",
+    "text": "Upload the model\n\nmetadata = {\n    \"model_name\": hf_model_name,\n    \"architecture\": model_name,\n    \"framework\": \"PyTorch\",\n    \"datasets\": [\"ImageNet\"],\n    \"task\": \"Classification\",\n    \"metrics\": {\"Model Accuracy\": acc},\n    \"usage_example\": \"\"\"\"\"\",\n    \"description\": \"A simple torchvision model\",\n    \"license\": \"mit\",\n    \"tags\": [\"classification\"],\n}\n\n\n# Generate the README content\nreadme_content = generate_readme(metadata)\n\n# Save the README to a file\nwith open(\"README.md\", \"w\") as f:\n    f.write(readme_content)\n\nprint(\"README.md has been generated.\")\n\nREADME.md has been generated.\n\n\n\ncreate_repository(f\"Nathan12/{hf_model_name}\")\n\nsave_and_upload_model(f\"Nathan12/{hf_model_name}\", model, f\"{model_name}\", readme_path=\"README.md\")",
+    "crumbs": [
+      "Usage"
+    ]
+  },
+  {
+    "objectID": "tutorial.usage.html#load-the-model-from-huggingface",
+    "href": "tutorial.usage.html#load-the-model-from-huggingface",
+    "title": "Usage",
+    "section": "Load the model from HuggingFace",
+    "text": "Load the model from HuggingFace\n\nfrom huggingface_hub import hf_hub_download\nimport torch\n\n# Download the model from Hugging Face\nmodel_file = hf_hub_download(\n    repo_id=f\"Nathan12/{hf_model_name}\",\n    filename=model_name\n)\n\n# Load the model (architecture + weights)\nmodel = torch.load(model_file)\n\nprint(\"Model loaded successfully!\")\n\n\n\n\n/tmp/ipykernel_11566/2452638795.py:11: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.\n  model = torch.load(model_file)\n\n\nModel loaded successfully!\n\n\n\nlearn = Learner(dls, model, metrics = [accuracy])\nlearn.fit_one_cycle(5)\n\n\n\n\n\n\n\n\nepoch\ntrain_loss\nvalid_loss\naccuracy\ntime\n\n\n\n\n0\n1.561073\n1.590430\n0.476688\n00:05\n\n\n1\n1.508280\n1.513178\n0.504204\n00:05\n\n\n2\n1.322130\n1.321613\n0.576815\n00:05\n\n\n3\n1.143002\n1.087752\n0.644331\n00:05\n\n\n4\n1.034787\n1.018889\n0.674140\n00:05",
+    "crumbs": [
+      "Usage"
+    ]
+  },
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "fastermodels",
+    "section": "",
+    "text": "This file will become your README and also the index of your documentation.",
+    "crumbs": [
+      "fastermodels"
+    ]
+  },
+  {
+    "objectID": "index.html#developer-guide",
+    "href": "index.html#developer-guide",
+    "title": "fastermodels",
+    "section": "Developer Guide",
+    "text": "Developer Guide\nIf you are new to using nbdev here are some useful pointers to get you started.\n\nInstall fastermodels in Development mode\n# make sure fastermodels package is installed in development mode\n$ pip install -e .\n\n# make changes under nbs/ directory\n# ...\n\n# compile to have changes apply to fastermodels\n$ nbdev_prepare",
+    "crumbs": [
+      "fastermodels"
+    ]
+  },
+  {
+    "objectID": "index.html#usage",
+    "href": "index.html#usage",
+    "title": "fastermodels",
+    "section": "Usage",
+    "text": "Usage\n\nInstallation\nInstall latest from the GitHub repository:\n$ pip install git+https://github.com/FasterAI-Labs/fastermodels.git\nor from conda\n$ conda install -c FasterAI-Labs fastermodels\nor from pypi\n$ pip install fastermodels\n\n\nDocumentation\nDocumentation can be found hosted on this GitHub repository’s pages. Additionally you can find package manager specific guidelines on conda and pypi respectively.",
+    "crumbs": [
+      "fastermodels"
+    ]
+  },
+  {
+    "objectID": "index.html#how-to-use",
+    "href": "index.html#how-to-use",
+    "title": "fastermodels",
+    "section": "How to use",
+    "text": "How to use\nFill me in please! Don’t forget code examples:\n\n1+1\n\n2",
+    "crumbs": [
+      "fastermodels"
+    ]
+  }
+]

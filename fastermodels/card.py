@@ -25,23 +25,43 @@ def _accuracy(k, n):
     return f"{k}/{n} = {100 * k / n:.2f} % (Wilson 95 % [{100 * lo:.2f}, {100 * hi:.2f}])"
 
 
+def _count(v):
+    "A count the producer measured, or n/a"
+    return f"{v:,}" if isinstance(v, int) and not isinstance(v, bool) else 'n/a'
+
+
+def _gap(artifact, reference):
+    "Change from the reference in percent; never a ratio, a smaller model is not a faster one"
+    if _count(artifact) == 'n/a' or _count(reference) == 'n/a' or reference == 0: return 'n/a'
+    return f"{100 * (artifact - reference) / reference:+.1f} %"
+
+
 def render_card(
-    meta: dict,  # name, base_model, license, datasets, tags, scope_line, recipe, reference, rows, latency, provenance
+    meta: dict,  # name, base_model, license, datasets, tags, scope_line, input_shape, recipe, reference, rows, latency, provenance
 ) -> str:
-    "Render the model card: front matter, scope, recipe, accuracy table, size, latency and provenance"
+    "Render the model card: front matter, scope, recipe, the four criteria against the reference, latency and provenance"
     ref, latency = meta['reference'], meta.get('latency')
     out = ['---', 'library_name: fastermodels', f"license: {meta['license']}", f"base_model: {meta['base_model']}", 'datasets:']
     out += [f"  - {d}" for d in meta.get('datasets', [])]
     out += ['tags:'] + [f"  - {t}" for t in meta.get('tags', ['fasterai'])]
     out += ['---', '', f"# {meta['name']}", '', meta['scope_line'], '', '## Recipe', '']
     out += [f"- `{k}`: {v}" for k, v in (meta.get('recipe') or {}).items()]
-    out += ['', '## Accuracy', '', f"Reference: **{ref['name']}** — {_accuracy(ref['k'], ref['n'])}", '',
-            '| artifact | file | params | bytes | accuracy | delta (pt) | 95 % CI | McNemar p | agreement | agreement kind |',
-            '|---|---|---|---|---|---|---|---|---|---|']
-    out += [f"| {r['artifact']} | `{r['file']}` | {r['params']:,} | {r['bytes']:,} | {_accuracy(r['k'], r['n'])} "
-            f"| {r['delta']:+.2f} | [{r['lo']:+.2f}, {r['hi']:+.2f}] | {r['p_mcnemar']:.4f} | {r['agreement']:.4f} "
-            f"| {r['agreement_kind']} |" for r in meta.get('rows', [])]
-    out += ['', '## Latency', '']
+    out += ['', '## Criteria', '',
+            f"Top-1 on the evaluation set named above, size on disk, peak live activations and "
+            f"multiply-accumulates — the last two for one image of {meta.get('input_shape', 'the evaluation resolution')} "
+            f"at batch 1 — each against **{ref['name']}**.", '']
+    for r in meta.get('rows', []):
+        out += [f"### {r['artifact']} (`{r['file']}`)", '',
+                '| criterion | reference | this artifact | gap |', '|---|---|---|---|',
+                f"| top-1 | {_accuracy(ref['k'], ref['n'])} | {_accuracy(r['k'], r['n'])} "
+                f"| {r['delta']:+.2f} pt, 95 % CI [{r['lo']:+.2f}, {r['hi']:+.2f}], McNemar p {r['p_mcnemar']:.4f} |",
+                f"| size | {_count(ref.get('bytes'))} B, {_count(ref.get('params'))} params "
+                f"| {_count(r.get('bytes'))} B, {_count(r.get('params'))} params "
+                f"| {_gap(r.get('bytes'), ref.get('bytes'))} bytes, {_gap(r.get('params'), ref.get('params'))} params |",
+                f"| memory | {_count(ref.get('peak_activation_bytes'))} B | {_count(r.get('peak_activation_bytes'))} B "
+                f"| {_gap(r.get('peak_activation_bytes'), ref.get('peak_activation_bytes'))} |",
+                f"| MACs | {_count(ref.get('macs'))} | {_count(r.get('macs'))} | {_gap(r.get('macs'), ref.get('macs'))} |", '']
+    out += ['## Latency', '']
     if not latency: out += ['non mesurée']
     else:
         out += ['| device | runtime | precision | batch | median (ms) | runs |', '|---|---|---|---|---|---|']

@@ -26,6 +26,11 @@ class GateRow:
     def as_dict(self) -> dict: return asdict(self)
 
 
+def _is_count(v):
+    "A measured count: a non-negative int, never a bool and never a claim left out"
+    return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+
 def _reload_hash(artifact_dir, python, pythonpath):
     "State hash of the artifact reloaded by a fresh interpreter with a scrubbed environment"
     code = ("from fastermodels import FasterModel, state_hash\n"
@@ -77,9 +82,14 @@ def run_gate(
     add(1, 'fresh-interpreter reload', got is not None and got == claimed,
         f"reloaded {got} vs manifest {claimed}" if got else f"reload failed: {err}")
 
-    parity = [p for p in (manifest.get('parity') or []) if p.get('kind') == 'same-precision']
-    add(2, 'same-precision parity', parity and all((p.get('agreement') or 0) >= 0.995 for p in parity),
-        '; '.join(f"{p.get('arms')} {p.get('agreement')}" for p in parity) or 'no same-precision parity arm')
+    parity = manifest.get('parity') or []
+    same = [p for p in parity if p.get('kind') == 'same-precision']
+    batch = [p for p in parity if p.get('kind') == 'batch-invariance']
+    add(2, 'parity', same and all((p.get('agreement') or 0) >= 0.995 for p in same)
+        and all(p.get('max_abs_diff') is not None and p['max_abs_diff'] <= 1e-5 for p in batch),
+        '; '.join([f"{p.get('arms')} {p.get('agreement')}" for p in same]
+                  + [f"{p.get('arms')} max_abs_diff={p.get('max_abs_diff')}" for p in batch])
+        or 'no same-precision parity arm')
 
     delta = manifest.get('delta') or {}
     lo, floor = delta.get('lo'), delta.get('floor')
@@ -93,9 +103,13 @@ def run_gate(
     add(5, 'head and widths', head.get('expected') is not None and head.get('num_classes') == head.get('expected') and widths,
         f"num_classes={head.get('num_classes')} expected={head.get('expected')} widths={len(widths)} layers")
 
-    latency = manifest.get('latency_rows')
-    add(6, 'latency', (isinstance(latency, list) and len(latency) > 0) or latency == 'non mesurée',
-        f"{len(latency)} rows" if isinstance(latency, list) else f"latency_rows={latency!r}")
+    latency, rows_ = manifest.get('latency_rows'), manifest.get('rows') or []
+    missing = [f"row {i} has no {f}" for i, r in enumerate(rows_) for f in ('bytes', 'peak_activation_bytes', 'macs')
+               if not _is_count(r.get(f))]
+    add(6, 'size, memory, MACs and latency',
+        rows_ and not missing and ((isinstance(latency, list) and len(latency) > 0) or latency == 'non mesurée'),
+        '; '.join(missing) or (f"{len(rows_)} rows measured, latency_rows="
+                               + (f"{len(latency)} rows" if isinstance(latency, list) else f"{latency!r}")))
 
     card = d / 'README.md'
     flagged = check_card(card.read_text()) if card.exists() else None

@@ -13,7 +13,8 @@ the layers that changed, and the weights, in one artifact that reloads anywhere 
 It also carries what a reader needs in order to trust the artifact:
 
 - **`FasterModel`** — rebuild the architecture from its spec, load the weights strictly, push to the Hub
-- **eval** — per-image correctness, Wilson intervals, paired deltas with an exact McNemar p
+- **eval** — the four criteria a card carries: top-1 (per-image correctness, Wilson intervals, paired deltas
+  with an exact McNemar p), size, memory (peak live activations) and MACs
 - **card** — a model card written from measured values only, and a reader that flags what it should not say
 - **gate** — the ten conditions an artifact meets before it is published
 
@@ -38,13 +39,14 @@ fm.save_pretrained('artifact')            # config.json + model.safetensors
 Load it back and measure it:
 
 ``` python
-from fastermodels import FasterModel, correct_vector, wilson, paired_delta
+from fastermodels import FasterModel, correct_vector, wilson, paired_delta, params, macs, peak_activation_bytes
 
 fm = FasterModel.from_pretrained('artifact')   # rebuilt from config.json, loaded strictly
 opt = correct_vector(fm, valid_dl)
 k, n = int(opt.sum()), opt.size
 wilson(k, n)                                   # the interval that belongs next to k/n
 paired_delta(correct_vector(source, valid_dl), opt)
+params(fm), macs(fm, sample), peak_activation_bytes(fm, sample)   # size, compute, memory at batch 1
 ```
 
 Write its card and run the gate before publishing:

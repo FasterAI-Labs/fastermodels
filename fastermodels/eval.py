@@ -9,16 +9,24 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 import torch
+import torch.ao.nn.quantized as nnq
 import torch.nn as nn
+from torch.fx.passes.shape_prop import ShapeProp
 
 # %% auto #0
-__all__ = ['predictions', 'correct_vector', 'wilson', 'PairedDelta', 'paired_delta', 'agreement']
+__all__ = ['predictions', 'correct_vector', 'wilson', 'PairedDelta', 'paired_delta', 'agreement', 'params', 'macs',
+           'peak_activation_bytes']
 
 # %% ../nbs/01_eval.ipynb #run
-def _run(model, dl, device):
-    "One pass over `dl`: predicted classes and targets"
+def _check_eval(model):
+    "A model measured in training mode reports the batch it was given, not the model"
     if isinstance(model, nn.Module) and model.training:
         raise ValueError("model is in training mode: call model.eval() first")
+
+
+def _run(model, dl, device):
+    "One pass over `dl`: predicted classes and targets"
+    _check_eval(model)
     preds, targets = [], []
     with torch.no_grad():
         for x, y in dl:
@@ -113,3 +121,74 @@ def agreement(
     "Fraction of images on which two artifacts predict the same class"
     a, b = _pair(pred_a, pred_b)
     return float((a == b).mean())
+
+# %% ../nbs/01_eval.ipynb #metrics
+_CONV, _LINEAR = (nn.Conv2d, nnq.Conv2d), (nn.Linear, nnq.Linear)
+
+
+def params(
+    model: nn.Module,  # the model to weigh
+) -> int:
+    "Number of weights; a quantized module keeps its weight packed outside `parameters()`, so it is counted apart (its bias is not)"
+    return (sum(p.numel() for p in model.parameters())
+            + sum(m.weight().numel() for m in model.modules() if isinstance(m, (nnq.Conv2d, nnq.Linear))))
+
+
+def macs(
+    model: nn.Module,       # the model to count, in eval mode
+    sample: torch.Tensor,   # a batch; only its first image is used
+) -> int:
+    "Multiply-accumulates of one forward at batch 1, over convolutions and linear layers only — normalisation, activations, pooling and additions are not counted"
+    _check_eval(model)
+    counted, handles = [], []
+    def hook(m, inp, out):
+        if isinstance(m, _LINEAR): counted.append(out.numel() * m.in_features)
+        else:
+            w = m.weight() if callable(m.weight) else m.weight   # a quantized module hands its weight back through a call
+            counted.append(out.numel() * math.prod(w.shape[1:]))
+    for m in model.modules():
+        if isinstance(m, _CONV + _LINEAR): handles.append(m.register_forward_hook(hook))
+    try:
+        with torch.no_grad(): model(sample[:1])
+    finally:
+        for h in handles: h.remove()
+    return sum(counted)
+
+
+def _node_bytes(n):
+    "Bytes of a node's output, 0 when it is not a tensor (TensorMetadata is itself a tuple, hence the `shape` test first)"
+    meta = n.meta.get('tensor_meta')
+    metas = [meta] if hasattr(meta, 'shape') else meta if isinstance(meta, (tuple, list)) else []
+    return sum(math.prod(m.shape) * m.dtype.itemsize for m in metas if hasattr(m, 'shape'))
+
+
+def _reuses_input(gm, n):
+    "True when the node writes into its input's buffer instead of allocating one"
+    if n.op == 'call_module': return getattr(gm.get_submodule(n.target), 'inplace', False)
+    return str(getattr(n.target, '__name__', n.target)).endswith('_')
+
+
+def peak_activation_bytes(
+    model: nn.Module,      # the model to measure, in eval mode
+    sample: torch.Tensor,  # a batch; only its first image is used
+) -> int:
+    "Peak bytes of the activations alive at once during one forward at batch 1; weights are size, not memory of work, so they are not counted"
+    _check_eval(model)
+    if isinstance(model, torch.fx.GraphModule): gm = model
+    else:
+        try: gm = torch.fx.symbolic_trace(model)
+        except Exception as e:
+            raise ValueError(f"cannot trace {type(model).__name__} ({e}) — pass an FX GraphModule, which is what "
+                             f"`convert_fx` returns") from e
+    ShapeProp(gm).propagate(sample[:1])
+    nodes = list(gm.graph.nodes)
+    last = {a: i for i, n in enumerate(nodes) for a in n.all_input_nodes}
+    live, peak = {}, 0
+    for i, n in enumerate(nodes):
+        if n.op not in ('get_attr', 'output'):
+            live[n] = (live.pop(n.all_input_nodes[0], _node_bytes(n)) if _reuses_input(gm, n) and n.all_input_nodes
+                       else _node_bytes(n))
+        peak = max(peak, sum(live.values()))
+        for prev in n.all_input_nodes:
+            if last.get(prev) == i: live.pop(prev, None)
+    return peak

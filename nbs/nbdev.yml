@@ -5,7 +5,7 @@ website:
   title: "fastermodels"
   site-url: "https://FasterAI-Labs.github.io/fastermodels"
   description: "Load, evaluate and publish models optimized by fasterai"
-  repo-branch: master
+  repo-branch: main
   repo-url: "https://github.com/FasterAI-Labs/fastermodels"
 
 format-links:

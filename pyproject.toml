@@ -16,7 +16,7 @@ dependencies = ['torch', 'huggingface_hub>=0.25', 'safetensors', 'numpy']
 
 [project.optional-dependencies]
 test = ['torchvision', 'torch-pruning', 'onnx', 'fastcore']
-dev = ['torchvision', 'torch-pruning', 'onnx', 'fastcore']
+dev = ['nbdev', 'torchvision', 'torch-pruning', 'onnx', 'fastcore']
 
 [project.urls]
 Repository = "https://github.com/FasterAI-Labs/fastermodels"
@@ -32,7 +32,7 @@ version = {attr = "fastermodels.__version__"}
 include = ["fastermodels*"]
 
 [tool.nbdev]
-branch = 'master'
+branch = 'main'
 tst_flags = 'slow'
 custom_sidebar = true
 title = 'fastermodels'

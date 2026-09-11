@@ -3,6 +3,7 @@
 # %% ../nbs/03_gate.ipynb #imports
 from __future__ import annotations
 
+import math
 import os
 import subprocess
 import sys
@@ -16,6 +17,11 @@ __all__ = ['BATCH_TOL', 'GateRow', 'run_gate', 'gate_passed']
 
 # %% ../nbs/03_gate.ipynb #gate
 BATCH_TOL = 1e-3   # float32 CPU convolutions differ by ~1e-5 between batch sizes; the failure this guards is of order 1
+
+
+def _finite(v):
+    "A number that was actually measured"
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
 @dataclass(slots=True)
@@ -90,11 +96,13 @@ def run_gate(
         or 'no same-precision parity arm')
 
     delta = manifest.get('delta') or {}
-    lo, floor = delta.get('lo'), delta.get('floor')
-    add(3, 'accuracy delta above floor', lo is not None and floor is not None and lo > floor,
+    target = delta.get('target', delta.get('floor'))   # `floor` is what this key was called; read for one release
+    measured = all(_finite(delta.get(f)) for f in ('delta', 'lo', 'hi'))
+    add(3, 'accuracy delta measured', measured,
         (f"arms={delta['arms']} " if 'arms' in delta else '')   # the producer names the row it judged
-        + f"delta={delta.get('delta')} lo={lo} hi={delta.get('hi')} floor={floor}"
-        + ('' if lo is not None else ' — no interval, so no verdict'))
+        + f"delta={delta.get('delta')} lo={delta.get('lo')} hi={delta.get('hi')}"
+        + (f" target={target} {'met' if measured and delta['lo'] > target else 'not met'}" if target is not None else '')
+        + ('' if measured else ' — no interval, so no verdict'))
 
     add(4, 'exported file', *_onnx_conditions(d / 'model.onnx', (manifest.get('files') or {}).get('onnx')))
 

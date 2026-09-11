@@ -42,7 +42,7 @@ def _gap(artifact, reference):
 
 
 def render_card(
-    meta: dict,  # name, base_model, license, datasets, tags, scope_line, input_shape, recipe, rows, latency, provenance, and reference: name, k, n, bytes, params, macs, peak_activation_bytes
+    meta: dict,  # name, base_model, license, datasets, tags, scope_line, input_shape, recipe, rows, latency, provenance, optional ladder, and reference: name, k, n, bytes, params, macs, peak_activation_bytes
 ) -> str:
     "Render the model card: front matter, scope, recipe, the four criteria against the reference, latency and provenance"
     ref, latency = meta['reference'], meta.get('latency')
@@ -67,7 +67,17 @@ def render_card(
                 f"| {_gap(r.get('bytes'), ref.get('bytes'))} bytes, {_gap(r.get('params'), ref.get('params'))} params |",
                 f"| memory | {_count(ref.get('peak_activation_bytes'))} B | {_count(r.get('peak_activation_bytes'))} B "
                 f"| {_gap(r.get('peak_activation_bytes'), ref.get('peak_activation_bytes'))} |",
-                f"| MACs | {_count(ref.get('macs'))} | {_count(r.get('macs'))} | {_gap(r.get('macs'), ref.get('macs'))} |", '']
+                f"| MACs | {_count(ref.get('macs'))} | {_count(r.get('macs'))} | {_gap(r.get('macs'), ref.get('macs'))} |"]
+        if r.get('target') is not None:
+            met = 'met' if r.get('lo') is not None and r['lo'] > r['target'] else 'not met'
+            out += ['', f"Accuracy target: {r['target']:+.1f} pt — {met} (lower bound {r['lo']:+.2f})"]
+        out += ['']
+    if meta.get('ladder'):
+        out += ['## Variants', '', 'Other points on the same ladder, from the same source model:', '',
+                '| variant | repo | top-1 gap (pt) | bytes | memory (B) | MACs |', '|---|---|---|---|---|---|']
+        out += [f"| {v['name']} | `{v['repo']}` | {v['delta']:+.2f} | {_count(v.get('bytes'))} "
+                f"| {_count(v.get('peak_activation_bytes'))} | {_count(v.get('macs'))} |" for v in meta['ladder']]
+        out += ['']
     out += ['## Latency', '']
     if not latency: out += ['non mesurée']
     else:

@@ -1,3 +1,38 @@
 [build-system]
-requires = ["setuptools>=64.0"]
+requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastermodels"
+dynamic = ["version"]
+description = "Load, evaluate and publish models optimized by fasterai"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{name = "Nathan Hubens", email = "nathan.hubens@gmail.com"}]
+keywords = ['model-hub', 'compression', 'pruning', 'quantization', 'evaluation', 'deep-learning']
+classifiers = ["Natural Language :: English", "Intended Audience :: Developers", "Development Status :: 3 - Alpha", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3 :: Only"]
+dependencies = ['torch', 'huggingface_hub>=0.25', 'safetensors', 'numpy']
+
+[project.optional-dependencies]
+test = ['torchvision', 'torch-pruning', 'onnx', 'fastcore']
+dev = ['nbdev', 'torchvision', 'torch-pruning', 'onnx', 'fastcore']
+
+[project.urls]
+Repository = "https://github.com/FasterAI-Labs/fastermodels"
+Documentation = "https://FasterAI-Labs.github.io/fastermodels/"
+
+[project.entry-points.nbdev]
+fastermodels = "fastermodels._modidx:d"
+
+[tool.setuptools.dynamic]
+version = {attr = "fastermodels.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["fastermodels*"]
+
+[tool.nbdev]
+branch = 'main'
+tst_flags = 'slow'
+custom_sidebar = true
+title = 'fastermodels'

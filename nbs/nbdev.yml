@@ -4,6 +4,11 @@ project:
 website:
   title: "fastermodels"
   site-url: "https://FasterAI-Labs.github.io/fastermodels"
-  description: ""
+  description: "Load, evaluate and publish models optimized by fasterai"
   repo-branch: main
   repo-url: "https://github.com/FasterAI-Labs/fastermodels"
+
+format-links:
+  - html
+  - format: commonmark
+    text: Markdown

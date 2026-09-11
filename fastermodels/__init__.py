@@ -1,6 +1,6 @@
 __version__ = "0.1.0"
 
-from fastermodels.model import FasterModel, spec_from, state_hash, resolve
+from fastermodels.model import FasterModel, spec_from, state_hash, resolve, load
 from fastermodels.eval import (predictions, correct_vector, wilson, paired_delta, PairedDelta, agreement,
                                params, macs, peak_activation_bytes)
 from fastermodels.card import render_card, check_card, FORBIDDEN

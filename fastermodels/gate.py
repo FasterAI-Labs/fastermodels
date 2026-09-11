@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .card import _is_count, check_card
+from .model import _FORMS
 
 # %% auto #0
 __all__ = ['BATCH_TOL', 'GateRow', 'run_gate', 'gate_passed']
@@ -35,15 +37,29 @@ class GateRow:
     def as_dict(self) -> dict: return asdict(self)
 
 
-def _reload_hash(artifact_dir, python, pythonpath):
-    "State hash of the artifact reloaded by a fresh interpreter with a scrubbed environment"
-    code = ("from fastermodels import FasterModel, state_hash\n"
-            f"print(state_hash(FasterModel.from_pretrained({str(artifact_dir)!r})))")
+def _hw(shape):
+    "Height and width of one image, read off a shape like '3x160x160'"
+    dims = [int(n) for n in re.findall(r'\d+', str(shape or ''))]
+    return tuple(dims[-2:]) if len(dims) >= 2 else (224, 224)
+
+
+def _reload(artifact_dir, python, pythonpath, input_shape):
+    "Reload the artifact in a fresh interpreter with a scrubbed environment: the form it published, and its digest"
+    h, w = _hw(input_shape)
+    code = ("import hashlib, torch\n"
+            "from pathlib import Path\n"
+            "from fastermodels import load, state_hash\n"
+            f"d = Path({str(artifact_dir)!r})\n"
+            "m = load(d)\n"
+            "if (d / 'model.safetensors').exists(): print('safetensors', state_hash(m))\n"
+            "else:\n"
+            f"    m(torch.zeros(1, 3, {h}, {w}))\n"
+            "    print('torchscript', hashlib.sha256((d / 'model.torchscript.pt').read_bytes()).hexdigest())")
     run = subprocess.run([python, '-c', code], capture_output=True, text=True,
                          env={'PATH': os.environ.get('PATH', ''), 'PYTHONPATH': pythonpath or ''})
     if run.returncode != 0 or not run.stdout.strip():
-        return None, (run.stderr.strip() or 'no output').splitlines()[-1]
-    return run.stdout.strip().splitlines()[-1], ''
+        return None, None, (run.stderr.strip() or 'no output').splitlines()[-1]
+    return (*run.stdout.strip().splitlines()[-1].split(), '')
 
 
 def _onnx_conditions(path, claimed):
@@ -81,10 +97,14 @@ def run_gate(
     add(0, 'license', lic.get('id') and lic.get('validated_by'),
         f"id={lic.get('id')!r} validated by {lic.get('validated_by')!r}")
 
-    claimed = (manifest.get('hashes') or {}).get('safetensors')
-    got, err = _reload_hash(d, python or sys.executable, pythonpath)
-    add(1, 'fresh-interpreter reload', got is not None and got == claimed,
-        f"reloaded {got} vs manifest {claimed}" if got else f"reload failed: {err}")
+    if not any((d / _FORMS[f]).exists() for f in ('safetensors', 'torchscript')):
+        add(1, 'fresh-interpreter reload', False,
+            f"the artifact has neither {_FORMS['safetensors']} nor {_FORMS['torchscript']} to reload")
+    else:
+        form, got, err = _reload(d, python or sys.executable, pythonpath, manifest.get('input_shape'))
+        claimed = (manifest.get('hashes') or {}).get(form)
+        add(1, 'fresh-interpreter reload', got is not None and got == claimed,
+            f"{form} reloaded {got} vs manifest {claimed}" if got else f"reload failed: {err}")
 
     parity = manifest.get('parity') or []
     same = [p for p in parity if p.get('kind') == 'same-precision']

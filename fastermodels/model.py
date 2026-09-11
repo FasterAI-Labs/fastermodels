@@ -5,13 +5,16 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import os
 from collections.abc import Callable
+from pathlib import Path
 
+import torch
 import torch.nn as nn
-from huggingface_hub import PyTorchModelHubMixin
+from huggingface_hub import PyTorchModelHubMixin, hf_hub_download, list_repo_files
 
 # %% auto #0
-__all__ = ['LAYER_TYPES', 'resolve', 'spec_from', 'state_hash', 'FasterModel']
+__all__ = ['LAYER_TYPES', 'resolve', 'spec_from', 'state_hash', 'FasterModel', 'load']
 
 # %% ../nbs/00_model.ipynb #layer-types
 LAYER_TYPES = {'Conv2d': nn.Conv2d, 'Linear': nn.Linear, 'BatchNorm2d': nn.BatchNorm2d, 'BatchNorm1d': nn.BatchNorm1d}
@@ -115,3 +118,30 @@ class FasterModel(nn.Module, PyTorchModelHubMixin,
     def _from_pretrained(cls, **kwargs):
         "Load strict, so a spec that disagrees with the weights raises instead of loading in part, and in eval mode"
         return super()._from_pretrained(**{**kwargs, 'strict': True}).eval()
+
+# %% ../nbs/00_model.ipynb #load
+_FORMS = {'safetensors': 'model.safetensors', 'torchscript': 'model.torchscript.pt', 'onnx': 'model.onnx'}
+
+
+def _fetch(repo_id, name):
+    "The local path of `name`, downloaded from the Hub unless `repo_id` is already a directory"
+    d = Path(repo_id)
+    return d / name if d.is_dir() else Path(hf_hub_download(repo_id, name))
+
+
+def load(
+    repo_id: str,        # a Hub repo id, or a local artifact directory
+    form: str = 'auto',  # 'auto', or one of 'safetensors', 'torchscript', 'onnx'
+    **kw,                # passed to `FasterModel.from_pretrained`
+):
+    "Load the form a repo publishes: a FasterModel, a TorchScript module, or the path of the ONNX file"
+    if form != 'auto' and form not in _FORMS:
+        raise ValueError(f"form must be 'auto' or one of {', '.join(_FORMS)}, got {form!r}")
+    d = Path(repo_id)
+    files = os.listdir(d) if d.is_dir() else list_repo_files(repo_id)
+    for f in (_FORMS if form == 'auto' else [form]):
+        if _FORMS[f] not in files: continue
+        if f == 'safetensors': return FasterModel.from_pretrained(repo_id, **kw)
+        if f == 'torchscript': return torch.jit.load(_fetch(repo_id, _FORMS[f]), map_location='cpu').eval()
+        return _fetch(repo_id, _FORMS[f])   # the caller opens the ONNX with the runtime of their choice
+    raise FileNotFoundError(f"{repo_id} publishes none of {', '.join(_FORMS.values())}")

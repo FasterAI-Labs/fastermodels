@@ -15,8 +15,8 @@ classifiers = ["Natural Language :: English", "Intended Audience :: Developers",
 dependencies = ['torch', 'huggingface_hub>=0.25', 'safetensors', 'numpy']
 
 [project.optional-dependencies]
-test = ['torchvision', 'torch-pruning', 'onnx']
-dev = ['torchvision', 'torch-pruning', 'onnx']
+test = ['torchvision', 'torch-pruning', 'onnx', 'fastcore']
+dev = ['torchvision', 'torch-pruning', 'onnx', 'fastcore']
 
 [project.urls]
 Repository = "https://github.com/FasterAI-Labs/fastermodels"

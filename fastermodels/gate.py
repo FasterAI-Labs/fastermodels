@@ -38,23 +38,23 @@ def _reload_hash(artifact_dir, python, pythonpath):
 
 
 def _onnx_conditions(path, claimed):
-    "Post-conditions read back from the exported ONNX itself when `onnx` is importable"
-    if not path.exists(): return True, 'no model.onnx in the artifact directory'
-    if not claimed: return False, 'model.onnx is there but the manifest has no files.onnx entry'
-    opset, dynamic, n_q, n_dq, note = (claimed.get('opset'), claimed.get('dynamic_batch'),
-                                       claimed.get('n_q'), claimed.get('n_dq'), '')
+    "Post-conditions read back from the exported ONNX itself, never from what the manifest claims about it"
+    if not claimed:
+        return (False, 'model.onnx is there but the manifest has no files.onnx entry') if path.exists() \
+            else (True, 'no model.onnx in the artifact directory')
+    if not path.exists(): return False, 'model.onnx claimed in the manifest but missing'
     try:
         import onnx
-        graph = onnx.load(str(path))
-        opset = max(i.version for i in graph.opset_import if i.domain in ('', 'ai.onnx'))
-        dynamic = graph.graph.input[0].type.tensor_type.shape.dim[0].HasField('dim_param')
-        n_q = sum(n.op_type == 'QuantizeLinear' for n in graph.graph.node)
-        n_dq = sum(n.op_type == 'DequantizeLinear' for n in graph.graph.node)
     except ImportError:
-        note = ' (onnx not importable, manifest values used)'
-    qdq = (claimed.get('n_q') or 0) > 0 or (claimed.get('n_dq') or 0) > 0
-    passed = opset == 17 and bool(dynamic) and (not qdq or ((n_q or 0) > 0 and (n_dq or 0) > 0))
-    return passed, f"opset={opset} dynamic_batch={bool(dynamic)} n_q={n_q} n_dq={n_dq}{note}"
+        return False, 'install onnx to verify model.onnx'
+    graph = onnx.load(str(path))
+    opset = max(i.version for i in graph.opset_import if i.domain in ('', 'ai.onnx'))
+    dynamic = graph.graph.input[0].type.tensor_type.shape.dim[0].HasField('dim_param')
+    n_q = sum(n.op_type == 'QuantizeLinear' for n in graph.graph.node)
+    n_dq = sum(n.op_type == 'DequantizeLinear' for n in graph.graph.node)
+    qdq = (claimed.get('n_q') or 0) > 0 or (claimed.get('n_dq') or 0) > 0   # the manifest claims Q/DQ, n_q and n_dq come from the file
+    passed = opset == 17 and dynamic and (not qdq or (n_q > 0 and n_dq > 0))
+    return passed, f"opset={opset} dynamic_batch={dynamic} n_q={n_q} n_dq={n_dq}"
 
 
 def run_gate(
@@ -68,9 +68,9 @@ def run_gate(
     d, rows = Path(artifact_dir), []
     def add(condition, name, passed, evidence): rows.append(GateRow(condition, name, bool(passed), evidence))
 
-    licence = manifest.get('license') or {}
-    add(0, 'licence', licence.get('id') and licence.get('validated_by'),
-        f"id={licence.get('id')!r} validated by {licence.get('validated_by')!r}")
+    lic = manifest.get('license') or {}
+    add(0, 'license', lic.get('id') and lic.get('validated_by'),
+        f"id={lic.get('id')!r} validated by {lic.get('validated_by')!r}")
 
     claimed = (manifest.get('hashes') or {}).get('safetensors')
     got, err = _reload_hash(d, python or sys.executable, pythonpath)

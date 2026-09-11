@@ -10,7 +10,7 @@ checkpoint alone will not load. `fastermodels` publishes the missing half: the f
 the layers that changed, and the weights, in one artifact that reloads anywhere with
 `FasterModel.from_pretrained`.
 
-It also carries what a reader needs to believe the artifact:
+It also carries what a reader needs in order to trust the artifact:
 
 - **`FasterModel`** — rebuild the architecture from its spec, load the weights strictly, push to the Hub
 - **eval** — per-image correctness, Wilson intervals, paired deltas with an exact McNemar p

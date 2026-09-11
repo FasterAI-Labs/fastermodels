@@ -17,7 +17,8 @@ __all__ = ['predictions', 'correct_vector', 'wilson', 'PairedDelta', 'paired_del
 # %% ../nbs/01_eval.ipynb #run
 def _run(model, dl, device):
     "One pass over `dl`: predicted classes and targets"
-    if isinstance(model, nn.Module): model = model.to(device).eval()
+    if isinstance(model, nn.Module) and model.training:
+        raise ValueError("model is in training mode: call model.eval() first")
     preds, targets = [], []
     with torch.no_grad():
         for x, y in dl:
@@ -34,7 +35,7 @@ def _run(model, dl, device):
 def predictions(
     model: Callable,                     # a model, or anything callable on a batch of inputs
     dl,                                  # dataloader yielding (inputs, targets)
-    device: str | torch.device = 'cpu',  # device the inputs are moved to
+    device: str | torch.device = 'cpu',  # device the batches are moved to; the model must already live there
 ) -> np.ndarray:
     "Predicted class of every image, in dataloader order"
     return _run(model, dl, device)[0]
@@ -43,7 +44,7 @@ def predictions(
 def correct_vector(
     model: Callable,                     # a model, or anything callable on a batch of inputs
     dl,                                  # dataloader yielding (inputs, targets)
-    device: str | torch.device = 'cpu',  # device the inputs are moved to
+    device: str | torch.device = 'cpu',  # device the batches are moved to; the model must already live there
 ) -> np.ndarray:
     "Per-image correctness, in dataloader order"
     preds, targets = _run(model, dl, device)
@@ -75,6 +76,14 @@ class PairedDelta:
     def as_dict(self) -> dict: return asdict(self)
 
 
+def _pair(a, b):
+    "Two per-image vectors read as arrays over the same images"
+    a, b = np.asarray(a), np.asarray(b)
+    if a.shape != b.shape: raise ValueError(f"vectors must cover the same images, got {a.shape} and {b.shape}")
+    if a.size == 0: raise ValueError("vectors are empty — nothing to compare")
+    return a, b
+
+
 def _mcnemar(n01, n10):
     "Exact two-sided McNemar p from the discordant counts"
     n = n01 + n10
@@ -89,14 +98,11 @@ def paired_delta(
     seed: int = 0,       # seed of the resampling
 ) -> PairedDelta:
     "Accuracy difference b - a in points, with a paired bootstrap interval and the exact McNemar p"
-    a, b = np.asarray(a, dtype=bool), np.asarray(b, dtype=bool)
-    if a.shape != b.shape: raise ValueError(f"paired vectors must cover the same images, got {a.shape} and {b.shape}")
-    n = a.size
-    if n == 0: raise ValueError("paired vectors are empty — nothing to compare")
+    a, b = (x.astype(bool) for x in _pair(a, b))
+    d, n = b.astype(np.int8) - a.astype(np.int8), a.size
     idx = np.random.default_rng(seed).integers(0, n, size=(n_boot, n))
-    boot = 100 * (b[idx].mean(1) - a[idx].mean(1))
-    lo, hi = np.percentile(boot, [2.5, 97.5])
-    return PairedDelta(float(100 * (b.mean() - a.mean())), float(lo), float(hi),
+    lo, hi = np.percentile(100 * d[idx].mean(1), [2.5, 97.5])
+    return PairedDelta(float(100 * d.mean()), float(lo), float(hi),
                        _mcnemar(int((a & ~b).sum()), int((~a & b).sum())), n)
 
 # %% ../nbs/01_eval.ipynb #agreement
@@ -105,7 +111,5 @@ def agreement(
     pred_b: np.ndarray,  # predicted classes of the other
 ) -> float:
     "Fraction of images on which two artifacts predict the same class"
-    a, b = np.asarray(pred_a), np.asarray(pred_b)
-    if a.shape != b.shape: raise ValueError(f"prediction vectors must cover the same images, got {a.shape} and {b.shape}")
-    if a.size == 0: raise ValueError("prediction vectors are empty — nothing to compare")
+    a, b = _pair(pred_a, pred_b)
     return float((a == b).mean())

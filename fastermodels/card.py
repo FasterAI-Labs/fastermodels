@@ -14,7 +14,8 @@ __all__ = ['FORBIDDEN', 'render_card', 'check_card']
 FORBIDDEN = ('lossless', 'un moteur int8', 'an int8 engine', 'state-of-the-art', 'sota', 'verified',
              'nan', 'ok=false', 'inconclusive', 'todo', 'tbd', 'xxx', 'placeholder')
 
-_CONTEXT = ('cpu', 'gpu', 'orin', '5090', 'tensorrt', 'onnxruntime', 'ort', 'openvino', 'pytorch', 'torchscript')
+_DEVICES = ('cpu', 'gpu', 'orin', '5090', 'jetson')
+_RUNTIMES = ('tensorrt', 'onnxruntime', 'ort', 'openvino', 'pytorch', 'torchscript', 'eager')
 _SPEEDUP = re.compile(r'\b\d+(?:\.\d+)?\s?[x×](?!\w)', re.I)
 
 
@@ -53,10 +54,10 @@ def render_card(
 def check_card(
     text: str,  # the card to read back
 ) -> list[str]:
-    "Every forbidden phrase and every speedup claim with neither device nor runtime on its line; empty when the card is clean"
+    "Every forbidden phrase and every speedup claim without both a device and a runtime on its line; empty when the card is clean"
     found = [p for p in FORBIDDEN if re.search(rf"\b{re.escape(p)}\b", text, re.I)]
     for line in text.splitlines():
-        claim = _SPEEDUP.search(line)
-        if claim and not any(w in line.lower() for w in _CONTEXT):
-            found.append(f"{claim.group().strip()} with neither device nor runtime on its line")
+        claim, low = _SPEEDUP.search(line), line.lower()
+        if claim and not (any(w in low for w in _DEVICES) and any(w in low for w in _RUNTIMES)):
+            found.append(f"{claim.group().strip()} without both a device and a runtime on its line")
     return found

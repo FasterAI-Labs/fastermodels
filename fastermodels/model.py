@@ -47,7 +47,7 @@ def spec_from(
     spec = {}
     for name, m in model.named_modules():
         kind = type(m).__name__
-        if LAYER_TYPES.get(kind) is not type(m): continue
+        if LAYER_TYPES.get(kind) is not type(m): continue   # exact type: a subclass would not rebuild from these arguments
         spec[name] = {'type': kind, **{a: _plain(getattr(m, a)) for a in _ARGS[kind]}}
         if kind in ('Conv2d', 'Linear'): spec[name]['bias'] = m.bias is not None
     return spec
@@ -61,23 +61,22 @@ def state_hash(
     h = hashlib.sha256()
     for k in sorted(sd):
         t = sd[k]
-        h.update(k.encode())
-        h.update(str(tuple(t.shape)).encode())
-        h.update(str(t.dtype).encode())
+        h.update(f"{k}{tuple(t.shape)}{t.dtype}".encode())
         h.update(t.detach().cpu().contiguous().numpy().tobytes())
     return h.hexdigest()
 
 # %% ../nbs/00_model.ipynb #faster-model
 def _swap(net, name, kw):
     "Replace the leaf at `name` by a module rebuilt from its spec"
-    try:
-        net.get_submodule(name)
-    except AttributeError:
-        raise KeyError(f"module '{name}' is not in the source model — check `modules` against the source factory") from None
-    kw = dict(kw)
-    layer = LAYER_TYPES[kw.pop('type')](**kw)
     parent, _, child = name.rpartition('.')
-    setattr(net.get_submodule(parent) if parent else net, child, layer)
+    try:
+        host = net.get_submodule(parent)
+    except AttributeError:
+        host = None
+    if host is None or not hasattr(host, child):
+        raise KeyError(f"module '{name}' is not in the source model — check `modules` against the source factory")
+    kw = dict(kw)
+    setattr(host, child, LAYER_TYPES[kw.pop('type')](**kw))
 
 
 class FasterModel(nn.Module, PyTorchModelHubMixin,
@@ -96,6 +95,7 @@ class FasterModel(nn.Module, PyTorchModelHubMixin,
         super().__init__()
         self.net = resolve(source)(**(source_kwargs or {}))
         for name, kw in (modules or {}).items(): _swap(self.net, name, kw)
+        self.recipe, self.provenance = recipe, provenance   # these arguments are what the mixin writes to config.json
 
     def forward(self, x): return self.net(x)
 

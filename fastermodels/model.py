@@ -107,12 +107,12 @@ class FasterModel(nn.Module, PyTorchModelHubMixin,
              recipe: dict | None = None,         # the steps that produced the weights
              provenance: dict | None = None,     # versions, commits, weights the source started from
     ) -> "FasterModel":
-        "Wrap an optimized model, reading its rebuild spec off its layers"
+        "Wrap an optimized model, reading its rebuild spec off its layers; returned in eval mode"
         fm = cls(source=source, source_kwargs=source_kwargs, modules=spec_from(model), recipe=recipe, provenance=provenance)
         fm.net.load_state_dict(model.state_dict(), strict=True)
-        return fm
+        return fm.eval()
 
     @classmethod
     def _from_pretrained(cls, **kwargs):
-        "Load strict, so a spec that does not match the weights raises instead of loading in part"
-        return super()._from_pretrained(**{**kwargs, 'strict': True})
+        "Load strict, so a spec that disagrees with the weights raises instead of loading in part, and in eval mode"
+        return super()._from_pretrained(**{**kwargs, 'strict': True}).eval()

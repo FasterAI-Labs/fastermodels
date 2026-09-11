@@ -17,6 +17,7 @@ FORBIDDEN = ('lossless', 'un moteur int8', 'an int8 engine', 'state-of-the-art',
 _DEVICES = ('cpu', 'gpu', 'orin', '5090', 'jetson')
 _RUNTIMES = ('tensorrt', 'onnxruntime', 'ort', 'openvino', 'pytorch', 'torchscript', 'eager')
 _SPEEDUP = re.compile(r'\b\d+(?:\.\d+)?\s?[x×](?!\w)', re.I)
+_HUB_ID = re.compile(r'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')   # what the Hub accepts in `base_model:`
 
 
 def _accuracy(k, n):
@@ -51,8 +52,10 @@ def render_card(
     lic = meta['license']
     lic_id = lic['id'] if isinstance(lic, dict) else lic
     validated = lic.get('validated_by') if isinstance(lic, dict) else lic   # a plain string is one a person chose
+    base = meta['base_model']
+    hub_id = _HUB_ID.match(base)
     out = (['---', 'library_name: fastermodels'] + ([f"license: {lic_id}"] if validated else [])
-           + [f"base_model: {meta['base_model']}", 'datasets:'])
+           + ([f"base_model: {base}"] if hub_id else []) + ['datasets:'])
     out += [f"  - {d}" for d in meta.get('datasets', [])]
     out += ['tags:'] + [f"  - {t}" for t in meta.get('tags', ['fasterai'])]
     out += ['---', '', f"# {meta['name']}", '', meta['scope_line'], '', '## Recipe', '']
@@ -92,7 +95,8 @@ def render_card(
         out += ['| device | runtime | precision | batch | median (ms) | runs |', '|---|---|---|---|---|---|']
         out += [f"| {r['device']} | {r['runtime']} | {r['precision']} | {r['batch']} | {r['median_ms']} | {r['n_runs']} |"
                 for r in latency]
-    out += ['', '## Provenance', ''] + [f"- {k}: `{v}`" for k, v in (meta.get('provenance') or {}).items()]
+    out += (['', '## Provenance', ''] + ([] if hub_id else [f"- Source model: {base}"])
+            + [f"- {k}: `{v}`" for k, v in (meta.get('provenance') or {}).items()])
     if not validated: out += [f"- License: {lic_id} (not yet validated by a person)"]
     return '\n'.join(out) + '\n'
 

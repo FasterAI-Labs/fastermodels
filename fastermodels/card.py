@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import re
 
-from .eval import wilson
-
 # %% auto #0
 __all__ = ['FORBIDDEN', 'render_card', 'check_card']
 
@@ -20,20 +18,25 @@ _SPEEDUP = re.compile(r'\b\d+(?:\.\d+)?\s?[x×](?!\w)', re.I)
 _HUB_ID = re.compile(r'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')   # what the Hub accepts in `base_model:`
 
 
-def _accuracy(k, n):
-    "k/n in percent, with its Wilson 95 % interval"
-    lo, hi = wilson(k, n)
-    return f"{k}/{n} = {100 * k / n:.2f} % (Wilson 95 % [{100 * lo:.2f}, {100 * hi:.2f}])"
-
-
 def _is_count(v):
     "A measured count, never a bool passing itself off as one"
     return isinstance(v, int) and not isinstance(v, bool)
 
 
-def _count(v):
-    "A count the producer measured, or n/a"
-    return f"{v:,}" if _is_count(v) else 'n/a'
+def _top1(k, n):
+    "Top-1 in percent; the number of images is in the scope line, once"
+    return f"{100 * k / n:.1f} %"
+
+
+def _mb(v):
+    "A size in megabytes, or n/a"
+    return f"{v / 1e6:.1f} MB" if _is_count(v) else 'n/a'
+
+
+def _millions(v):
+    "A count in millions, or in billions past a thousand million"
+    if not _is_count(v): return 'n/a'
+    return f"{v / 1e9:.2f} G" if v >= 1e9 else f"{v / 1e6:.1f} M"
 
 
 def _gap(artifact, reference):
@@ -43,9 +46,9 @@ def _gap(artifact, reference):
 
 
 def render_card(
-    meta: dict,  # name, base_model, license (a string, or id and validated_by), datasets, tags, scope_line, input_shape, recipe, rows, latency, provenance, optional ladder, and reference: name, k, n, bytes, params, macs, peak_activation_bytes
+    meta: dict,  # name, base_model, license (a string, or id and validated_by), datasets, tags, scope_line, input_shape, rows, latency, provenance, optional recipe, ladder and gate, and reference: name, k, n, bytes, params, macs, peak_activation_bytes
 ) -> str:
-    "Render the model card: front matter, scope, recipe, the four criteria against the reference, latency and provenance"
+    "Render the model card: front matter, scope, the four criteria against the reference, latency and provenance"
     ref, latency = meta['reference'], meta.get('latency')
     missing = [f for f in ('name', 'k', 'n') if f not in ref]
     if missing: raise KeyError(f"meta['reference'] has no {missing} — the card names what it compares to, and on how many images")
@@ -58,36 +61,37 @@ def render_card(
            + ([f"base_model: {base}"] if hub_id else []) + ['datasets:'])
     out += [f"  - {d}" for d in meta.get('datasets', [])]
     out += ['tags:'] + [f"  - {t}" for t in meta.get('tags', ['fasterai'])]
-    out += ['---', '', f"# {meta['name']}", '', meta['scope_line'], '', '## Recipe', '']
-    out += [f"- `{k}`: {v}" for k, v in (meta.get('recipe') or {}).items()]
-    out += ['', '## Criteria', '',
+    out += ['---', '', f"# {meta['name']}", '', meta['scope_line'], '']
+    if meta.get('recipe'):
+        out += ['## Recipe', ''] + [f"- `{k}`: {v}" for k, v in meta['recipe'].items()] + ['']
+    out += ['## Criteria', '',
             f"Top-1 on the evaluation set named above, size on disk, peak live activations and "
             f"multiply-accumulates — the last two for one image of {meta.get('input_shape', 'the evaluation resolution')} "
-            f"at batch 1 — each against **{ref['name']}**.", '',
-            "Top-1 intervals are Wilson 95 %; the gap is a paired bootstrap 95 % CI (2000 resamples, seed 0) "
-            "with an exact McNemar p on the same images.", '']
+            f"at batch 1 — each against **{ref['name']}**.", '']
     for r in meta.get('rows', []):
         out += [f"### {r['artifact']} (`{r['file']}`)", '',
                 '| criterion | reference | this artifact | gap |', '|---|---|---|---|',
-                f"| top-1 | {_accuracy(ref['k'], ref['n'])} | {_accuracy(r['k'], r['n'])} "
-                f"| {r['delta']:+.2f} pt, 95 % CI [{r['lo']:+.2f}, {r['hi']:+.2f}], McNemar p {r['p_mcnemar']:.4f} |",
-                f"| size | {_count(ref.get('bytes'))} B, {_count(ref.get('params'))} params "
-                f"| {_count(r.get('bytes'))} B, {_count(r.get('params'))} params "
-                f"| {_gap(r.get('bytes'), ref.get('bytes'))} bytes, {_gap(r.get('params'), ref.get('params'))} params |",
-                f"| memory | {_count(ref.get('peak_activation_bytes'))} B | {_count(r.get('peak_activation_bytes'))} B "
+                f"| top-1 | {_top1(ref['k'], ref['n'])} | {_top1(r['k'], r['n'])} "
+                f"| {r['delta']:+.1f} pt [{r['lo']:+.1f}, {r['hi']:+.1f}] |",
+                f"| size | {_mb(ref.get('bytes'))}, {_millions(ref.get('params'))} params "
+                f"| {_mb(r.get('bytes'))}, {_millions(r.get('params'))} params "
+                f"| {_gap(r.get('bytes'), ref.get('bytes'))} |",
+                f"| memory | {_mb(ref.get('peak_activation_bytes'))} | {_mb(r.get('peak_activation_bytes'))} "
                 f"| {_gap(r.get('peak_activation_bytes'), ref.get('peak_activation_bytes'))} |",
-                f"| MACs | {_count(ref.get('macs'))} | {_count(r.get('macs'))} | {_gap(r.get('macs'), ref.get('macs'))} |"]
+                f"| MACs | {_millions(ref.get('macs'))} | {_millions(r.get('macs'))} | {_gap(r.get('macs'), ref.get('macs'))} |"]
         if r.get('target') is not None:   # a target the interval does not clear is not demonstrated, which is not a failure
             why = 'the interval straddles the target' if r['hi'] > r['target'] else 'the interval is entirely below the target'
-            said = (f"met (lower bound {r['lo']:+.2f})" if r['lo'] > r['target']
-                    else f"not demonstrated (lower bound {r['lo']:+.2f}; {why})")
+            said = (f"met (lower bound {r['lo']:+.1f})" if r['lo'] > r['target']
+                    else f"not demonstrated (lower bound {r['lo']:+.1f}; {why})")
             out += ['', f"Accuracy target: {r['target']:+.1f} pt — {said}"]
         out += ['']
+    if meta.get('rows'):
+        out += ['Gaps are measured on the same images as the reference; brackets give the 95 % interval.', '']
     if meta.get('ladder'):
         out += ['## Variants', '', 'Other points on the same ladder, from the same source model:', '',
-                '| variant | repo | top-1 gap (pt) | bytes | memory (B) | MACs |', '|---|---|---|---|---|---|']
-        out += [f"| {v['name']} | `{v['repo']}` | {v['delta']:+.2f} | {_count(v.get('bytes'))} "
-                f"| {_count(v.get('peak_activation_bytes'))} | {_count(v.get('macs'))} |" for v in meta['ladder']]
+                '| variant | repo | top-1 gap (pt) | size | memory | MACs |', '|---|---|---|---|---|---|']
+        out += [f"| {v['name']} | `{v['repo']}` | {v['delta']:+.1f} | {_mb(v.get('bytes'))} "
+                f"| {_mb(v.get('peak_activation_bytes'))} | {_millions(v.get('macs'))} |" for v in meta['ladder']]
         out += ['']
     out += ['## Latency', '']
     if not latency: out += ['non mesurée']
@@ -98,6 +102,10 @@ def render_card(
     out += (['', '## Provenance', ''] + ([] if hub_id else [f"- Source model: {base}"])
             + [f"- {k}: `{v}`" for k, v in (meta.get('provenance') or {}).items()])
     if not validated: out += [f"- License: {lic_id} (not yet validated by a person)"]
+    if meta.get('gate'):
+        failed = [g['name'] for g in meta['gate'] if not g['passed']]
+        out += ['', f"Publication checks: {len(meta['gate']) - len(failed)}/{len(meta['gate'])} passed"
+                    + (f" — not passed: {', '.join(failed)}." if failed else '.')]
     return '\n'.join(out) + '\n'
 
 

@@ -1,22 +1,35 @@
 project:
   type: website
+  render:
+    - "*"
+    - "!tests/**"
 
 format:
   html:
     theme: cosmo
     css: styles.css
     toc: true
-    keep-md: true
-  commonmark: default
 
 website:
-  twitter-card: true
   open-graph: true
   repo-actions: [issue]
+  page-footer: "&copy; By Nathan Hubens"
   navbar:
     background: primary
     search: true
+    right:
+      - icon: github
+        href: "https://github.com/FasterAI-Labs/fastermodels"
   sidebar:
     style: floating
+    collapse-level: 1
+    contents:
+      - index.ipynb
+      - section: API
+        contents:
+        - 00_model.ipynb
+        - 01_eval.ipynb
+        - 02_card.ipynb
+        - 03_gate.ipynb
 
-metadata-files: [nbdev.yml, sidebar.yml]
+metadata-files: [nbdev.yml]

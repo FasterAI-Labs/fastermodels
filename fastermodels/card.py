@@ -42,13 +42,17 @@ def _gap(artifact, reference):
 
 
 def render_card(
-    meta: dict,  # name, base_model, license, datasets, tags, scope_line, input_shape, recipe, rows, latency, provenance, optional ladder, and reference: name, k, n, bytes, params, macs, peak_activation_bytes
+    meta: dict,  # name, base_model, license (a string, or id and validated_by), datasets, tags, scope_line, input_shape, recipe, rows, latency, provenance, optional ladder, and reference: name, k, n, bytes, params, macs, peak_activation_bytes
 ) -> str:
     "Render the model card: front matter, scope, recipe, the four criteria against the reference, latency and provenance"
     ref, latency = meta['reference'], meta.get('latency')
     missing = [f for f in ('name', 'k', 'n') if f not in ref]
     if missing: raise KeyError(f"meta['reference'] has no {missing} — the card names what it compares to, and on how many images")
-    out = ['---', 'library_name: fastermodels', f"license: {meta['license']}", f"base_model: {meta['base_model']}", 'datasets:']
+    lic = meta['license']
+    lic_id = lic['id'] if isinstance(lic, dict) else lic
+    validated = lic.get('validated_by') if isinstance(lic, dict) else lic   # a plain string is one a person chose
+    out = (['---', 'library_name: fastermodels'] + ([f"license: {lic_id}"] if validated else [])
+           + [f"base_model: {meta['base_model']}", 'datasets:'])
     out += [f"  - {d}" for d in meta.get('datasets', [])]
     out += ['tags:'] + [f"  - {t}" for t in meta.get('tags', ['fasterai'])]
     out += ['---', '', f"# {meta['name']}", '', meta['scope_line'], '', '## Recipe', '']
@@ -56,7 +60,9 @@ def render_card(
     out += ['', '## Criteria', '',
             f"Top-1 on the evaluation set named above, size on disk, peak live activations and "
             f"multiply-accumulates — the last two for one image of {meta.get('input_shape', 'the evaluation resolution')} "
-            f"at batch 1 — each against **{ref['name']}**.", '']
+            f"at batch 1 — each against **{ref['name']}**.", '',
+            "Top-1 intervals are Wilson 95 %; the gap is a paired bootstrap 95 % CI (2000 resamples, seed 0) "
+            "with an exact McNemar p on the same images.", '']
     for r in meta.get('rows', []):
         out += [f"### {r['artifact']} (`{r['file']}`)", '',
                 '| criterion | reference | this artifact | gap |', '|---|---|---|---|',
@@ -68,9 +74,11 @@ def render_card(
                 f"| memory | {_count(ref.get('peak_activation_bytes'))} B | {_count(r.get('peak_activation_bytes'))} B "
                 f"| {_gap(r.get('peak_activation_bytes'), ref.get('peak_activation_bytes'))} |",
                 f"| MACs | {_count(ref.get('macs'))} | {_count(r.get('macs'))} | {_gap(r.get('macs'), ref.get('macs'))} |"]
-        if r.get('target') is not None:
-            met = 'met' if r.get('lo') is not None and r['lo'] > r['target'] else 'not met'
-            out += ['', f"Accuracy target: {r['target']:+.1f} pt — {met} (lower bound {r['lo']:+.2f})"]
+        if r.get('target') is not None:   # a target the interval does not clear is not demonstrated, which is not a failure
+            why = 'the interval straddles the target' if r['hi'] > r['target'] else 'the interval is entirely below the target'
+            said = (f"met (lower bound {r['lo']:+.2f})" if r['lo'] > r['target']
+                    else f"not demonstrated (lower bound {r['lo']:+.2f}; {why})")
+            out += ['', f"Accuracy target: {r['target']:+.1f} pt — {said}"]
         out += ['']
     if meta.get('ladder'):
         out += ['## Variants', '', 'Other points on the same ladder, from the same source model:', '',
@@ -85,6 +93,7 @@ def render_card(
         out += [f"| {r['device']} | {r['runtime']} | {r['precision']} | {r['batch']} | {r['median_ms']} | {r['n_runs']} |"
                 for r in latency]
     out += ['', '## Provenance', ''] + [f"- {k}: `{v}`" for k, v in (meta.get('provenance') or {}).items()]
+    if not validated: out += [f"- License: {lic_id} (not yet validated by a person)"]
     return '\n'.join(out) + '\n'
 
 

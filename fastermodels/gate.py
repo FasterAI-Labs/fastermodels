@@ -101,7 +101,7 @@ def run_gate(
     add(3, 'accuracy delta measured', measured,
         (f"arms={delta['arms']} " if 'arms' in delta else '')   # the producer names the row it judged
         + f"delta={delta.get('delta')} lo={delta.get('lo')} hi={delta.get('hi')}"
-        + (f" target={target} {'met' if measured and delta['lo'] > target else 'not met'}" if target is not None else '')
+        + (f" target={target} {'met' if measured and delta['lo'] > target else 'not demonstrated'}" if target is not None else '')
         + ('' if measured else ' — no interval, so no verdict'))
 
     add(4, 'exported file', *_onnx_conditions(d / 'model.onnx', (manifest.get('files') or {}).get('onnx')))

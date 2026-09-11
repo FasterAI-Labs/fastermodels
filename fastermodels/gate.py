@@ -92,7 +92,8 @@ def run_gate(
     delta = manifest.get('delta') or {}
     lo, floor = delta.get('lo'), delta.get('floor')
     add(3, 'accuracy delta above floor', lo is not None and floor is not None and lo > floor,
-        f"delta={delta.get('delta')} lo={lo} hi={delta.get('hi')} floor={floor}"
+        (f"arms={delta['arms']} " if 'arms' in delta else '')   # the producer names the row it judged
+        + f"delta={delta.get('delta')} lo={lo} hi={delta.get('hi')} floor={floor}"
         + ('' if lo is not None else ' — no interval, so no verdict'))
 
     add(4, 'exported file', *_onnx_conditions(d / 'model.onnx', (manifest.get('files') or {}).get('onnx')))

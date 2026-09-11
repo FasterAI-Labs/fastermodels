@@ -71,10 +71,9 @@ def _swap(net, name, kw):
     parent, _, child = name.rpartition('.')
     try:
         host = net.get_submodule(parent)
-    except AttributeError:
-        host = None
-    if host is None or not hasattr(host, child):
-        raise KeyError(f"module '{name}' is not in the source model — check `modules` against the source factory")
+        getattr(host, child)
+    except AttributeError as e:
+        raise KeyError(f"module '{name}' is not in the source model — check `modules` against the source factory") from e
     kw = dict(kw)
     setattr(host, child, LAYER_TYPES[kw.pop('type')](**kw))
 

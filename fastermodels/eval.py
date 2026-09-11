@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 import torch
 import torch.ao.nn.quantized as nnq
+import torch.fx
 import torch.nn as nn
 from torch.fx.passes.shape_prop import ShapeProp
 
@@ -123,7 +124,8 @@ def agreement(
     return float((a == b).mean())
 
 # %% ../nbs/01_eval.ipynb #metrics
-_CONV, _LINEAR = (nn.Conv2d, nnq.Conv2d), (nn.Linear, nnq.Linear)
+_QUANT = (nnq.Conv2d, nnq.Linear)
+_COUNTED = (nn.Conv2d, nn.Linear) + _QUANT
 
 
 def params(
@@ -131,7 +133,7 @@ def params(
 ) -> int:
     "Number of weights; a quantized module keeps its weight packed outside `parameters()`, so it is counted apart (its bias is not)"
     return (sum(p.numel() for p in model.parameters())
-            + sum(m.weight().numel() for m in model.modules() if isinstance(m, (nnq.Conv2d, nnq.Linear))))
+            + sum(m.weight().numel() for m in model.modules() if isinstance(m, _QUANT)))
 
 
 def macs(
@@ -142,12 +144,10 @@ def macs(
     _check_eval(model)
     counted, handles = [], []
     def hook(m, inp, out):
-        if isinstance(m, _LINEAR): counted.append(out.numel() * m.in_features)
-        else:
-            w = m.weight() if callable(m.weight) else m.weight   # a quantized module hands its weight back through a call
-            counted.append(out.numel() * math.prod(w.shape[1:]))
+        w = m.weight() if callable(m.weight) else m.weight   # a quantized module hands its weight back through a call
+        counted.append(out.numel() * math.prod(w.shape[1:]))  # one filter, or the in_features of a linear layer
     for m in model.modules():
-        if isinstance(m, _CONV + _LINEAR): handles.append(m.register_forward_hook(hook))
+        if isinstance(m, _COUNTED): handles.append(m.register_forward_hook(hook))
     try:
         with torch.no_grad(): model(sample[:1])
     finally:

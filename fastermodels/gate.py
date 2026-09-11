@@ -9,7 +9,7 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .card import check_card
+from .card import _is_count, check_card
 
 # %% auto #0
 __all__ = ['GateRow', 'run_gate', 'gate_passed']
@@ -24,11 +24,6 @@ class GateRow:
     evidence: str
 
     def as_dict(self) -> dict: return asdict(self)
-
-
-def _is_count(v):
-    "A measured count: a non-negative int, never a bool and never a claim left out"
-    return isinstance(v, int) and not isinstance(v, bool) and v >= 0
 
 
 def _reload_hash(artifact_dir, python, pythonpath):
@@ -103,12 +98,12 @@ def run_gate(
     add(5, 'head and widths', head.get('expected') is not None and head.get('num_classes') == head.get('expected') and widths,
         f"num_classes={head.get('num_classes')} expected={head.get('expected')} widths={len(widths)} layers")
 
-    latency, rows_ = manifest.get('latency_rows'), manifest.get('rows') or []
-    missing = [f"row {i} has no {f}" for i, r in enumerate(rows_) for f in ('bytes', 'peak_activation_bytes', 'macs')
-               if not _is_count(r.get(f))]
+    latency, measured = manifest.get('latency_rows'), manifest.get('rows') or []
+    missing = [f"row {i} has no {f}" for i, r in enumerate(measured) for f in ('bytes', 'peak_activation_bytes', 'macs')
+               if not (_is_count(r.get(f)) and r[f] >= 0)]
     add(6, 'size, memory, MACs and latency',
-        rows_ and not missing and ((isinstance(latency, list) and len(latency) > 0) or latency == 'non mesurée'),
-        '; '.join(missing) or (f"{len(rows_)} rows measured, latency_rows="
+        measured and not missing and ((isinstance(latency, list) and len(latency) > 0) or latency == 'non mesurée'),
+        '; '.join(missing) or (f"{len(measured)} rows measured, latency_rows="
                                + (f"{len(latency)} rows" if isinstance(latency, list) else f"{latency!r}")))
 
     card = d / 'README.md'

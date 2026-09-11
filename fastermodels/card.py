@@ -25,14 +25,19 @@ def _accuracy(k, n):
     return f"{k}/{n} = {100 * k / n:.2f} % (Wilson 95 % [{100 * lo:.2f}, {100 * hi:.2f}])"
 
 
+def _is_count(v):
+    "A measured count, never a bool passing itself off as one"
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
 def _count(v):
     "A count the producer measured, or n/a"
-    return f"{v:,}" if isinstance(v, int) and not isinstance(v, bool) else 'n/a'
+    return f"{v:,}" if _is_count(v) else 'n/a'
 
 
 def _gap(artifact, reference):
     "Change from the reference in percent; never a ratio, a smaller model is not a faster one"
-    if _count(artifact) == 'n/a' or _count(reference) == 'n/a' or reference == 0: return 'n/a'
+    if not (_is_count(artifact) and _is_count(reference) and reference): return 'n/a'
     return f"{100 * (artifact - reference) / reference:+.1f} %"
 
 

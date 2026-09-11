@@ -25,6 +25,9 @@ website:
     collapse-level: 1
     contents:
       - index.ipynb
+      - section: Tutorials
+        contents:
+        - tutorials/load_and_check.ipynb
       - section: API
         contents:
         - 00_model.ipynb

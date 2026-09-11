@@ -42,10 +42,12 @@ def _gap(artifact, reference):
 
 
 def render_card(
-    meta: dict,  # name, base_model, license, datasets, tags, scope_line, input_shape, recipe, reference, rows, latency, provenance
+    meta: dict,  # name, base_model, license, datasets, tags, scope_line, input_shape, recipe, rows, latency, provenance, and reference: name, k, n, bytes, params, macs, peak_activation_bytes
 ) -> str:
     "Render the model card: front matter, scope, recipe, the four criteria against the reference, latency and provenance"
     ref, latency = meta['reference'], meta.get('latency')
+    missing = [f for f in ('name', 'k', 'n') if f not in ref]
+    if missing: raise KeyError(f"meta['reference'] has no {missing} — the card names what it compares to, and on how many images")
     out = ['---', 'library_name: fastermodels', f"license: {meta['license']}", f"base_model: {meta['base_model']}", 'datasets:']
     out += [f"  - {d}" for d in meta.get('datasets', [])]
     out += ['tags:'] + [f"  - {t}" for t in meta.get('tags', ['fasterai'])]

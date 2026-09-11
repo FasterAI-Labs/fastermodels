@@ -12,9 +12,12 @@ from pathlib import Path
 from .card import _is_count, check_card
 
 # %% auto #0
-__all__ = ['GateRow', 'run_gate', 'gate_passed']
+__all__ = ['BATCH_TOL', 'GateRow', 'run_gate', 'gate_passed']
 
 # %% ../nbs/03_gate.ipynb #gate
+BATCH_TOL = 1e-3   # float32 CPU convolutions differ by ~1e-5 between batch sizes; the failure this guards is of order 1
+
+
 @dataclass(slots=True)
 class GateRow:
     "One publication condition and what it found"
@@ -81,9 +84,9 @@ def run_gate(
     same = [p for p in parity if p.get('kind') == 'same-precision']
     batch = [p for p in parity if p.get('kind') == 'batch-invariance']
     add(2, 'parity', same and all((p.get('agreement') or 0) >= 0.995 for p in same)
-        and all(p.get('max_abs_diff') is not None and p['max_abs_diff'] <= 1e-5 for p in batch),
+        and all(p.get('max_abs_diff') is not None and p['max_abs_diff'] <= BATCH_TOL for p in batch),
         '; '.join([f"{p.get('arms')} {p.get('agreement')}" for p in same]
-                  + [f"{p.get('arms')} max_abs_diff={p.get('max_abs_diff')}" for p in batch])
+                  + [f"{p.get('arms')} max_abs_diff={p.get('max_abs_diff')} (tolerance {BATCH_TOL})" for p in batch])
         or 'no same-precision parity arm')
 
     delta = manifest.get('delta') or {}

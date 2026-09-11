@@ -21,7 +21,7 @@ __all__ = ['predictions', 'correct_vector', 'wilson', 'PairedDelta', 'paired_del
 # %% ../nbs/01_eval.ipynb #run
 def _check_eval(model):
     "A model measured in training mode reports the batch it was given, not the model"
-    if isinstance(model, nn.Module) and model.training:
+    if getattr(model, 'training', False):   # a frozen TorchScript module has no `training` at all
         raise ValueError("model is in training mode: call model.eval() first")
 
 

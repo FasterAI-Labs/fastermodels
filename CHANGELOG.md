@@ -5,6 +5,32 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.1.1 — 2026-09-21
+
+A card now names what its checks cover, and an INT8 artifact carries the quantization step it paid.
+
+### Added
+
+- A row may carry `notes`, a list of sentences rendered as paragraphs after that row's table. (#6)
+- `UNMEASURED` is exported: the spellings `run_gate` accepts for a latency that was not measured. (#6)
+
+### Changed
+
+- The publication-checks line names what it covers — `N/N structural checks passed (they do not
+  include the accuracy target, whose verdict is in each table above)` — instead of a bare count that
+  read as a contradiction two lines under "not demonstrated". A failure now reads `Not passed: ...`. (#6)
+- The Variants table header reads `top-1 gap (pt), worst published form`: a ladder row is the worst
+  form each repository publishes, which is not the number that repository's own headline table
+  carries, and a reader comparing the two needs to be told. (#6)
+- A latency that was not measured is written `not measured`. `run_gate` still reads the old spelling
+  `non mesurée` for one release, in conditions 6 and 9. (#6)
+- Condition 3 additionally requires, of an INT8 artifact (`manifest['variant']['precision'] ==
+  'int8'`), that every row carry a `quantization` record with finite `delta`, `lo`, `hi` and
+  `agreement` — the step measured against the FP32 form the artifact was built from — and prints it.
+  An INT8 artifact published without that record fails, saying so. (#6)
+- Condition 2 prints the cross-precision parity arms alongside the same-precision and
+  batch-invariance ones. They are recorded, never thresholded. (#6)
+
 ## 0.1.0 — 2026-09-11
 
 First release carrying code. `0.0.1` was a placeholder that reserved the name on PyPI.

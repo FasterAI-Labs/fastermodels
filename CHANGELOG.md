@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.1.2 — 2026-09-21
+
+The card reports the top-1 an artifact reaches, not a gap on it.
+
+### Changed
+
+- Top-1 is absolute, above the table and never against a reference: `Top-1: 93.8 % [93.0, 94.5] on
+  3925 images` — the accuracy the artifact reaches, the 95 % interval when the row carries a
+  `wilson` pair, and the images it was measured on. A row without an interval still names its top-1
+  and its count. (#8)
+- The reference column and the gap now cover size, memory and MACs only; the reference's own top-1
+  is no longer on the card. The line under the tables reads `Top-1 brackets give the 95 % interval
+  over the evaluation images; size, memory and MACs gaps are against the reference.` (#8)
+- The Variants table header reads `top-1, worst published form` and each sibling shows its absolute
+  top-1, or `n/a` when that ladder entry carries no `k` and `n`. (#8)
+- The publication-checks line is `N/N structural checks passed.` — with no accuracy verdict left for
+  it to disclaim. A failure still reads `Not passed: ...`. (#8)
+
+### Removed
+
+- The accuracy-target line leaves the card: a row's `target`, and the `delta`, `lo` and `hi` around
+  it, are read by nothing the card renders. Manifest rows still carry them, and the gate still reads
+  them. (#8)
+
 ## 0.1.1 — 2026-09-21
 
 A card now names what its checks cover, and an INT8 artifact carries the quantization step it paid.

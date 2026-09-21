@@ -15,10 +15,11 @@ from .card import _is_count, check_card
 from .model import _FORMS
 
 # %% auto #0
-__all__ = ['BATCH_TOL', 'GateRow', 'run_gate', 'gate_passed']
+__all__ = ['BATCH_TOL', 'UNMEASURED', 'GateRow', 'run_gate', 'gate_passed']
 
 # %% ../nbs/03_gate.ipynb #gate
 BATCH_TOL = 1e-3   # float32 CPU convolutions differ by ~1e-5 between batch sizes; the failure this guards is of order 1
+UNMEASURED = ('not measured', 'non mesurée')   # the second spelling is the old one, read for one release
 
 
 def _finite(v):
@@ -109,20 +110,28 @@ def run_gate(
     parity = manifest.get('parity') or []
     same = [p for p in parity if p.get('kind') == 'same-precision']
     batch = [p for p in parity if p.get('kind') == 'batch-invariance']
+    cross = [p for p in parity if p.get('kind') == 'cross-precision']   # printed, never thresholded
     add(2, 'parity', same and all((p.get('agreement') or 0) >= 0.995 for p in same)
         and all(p.get('max_abs_diff') is not None and p['max_abs_diff'] <= BATCH_TOL for p in batch),
         '; '.join([f"{p.get('arms')} {p.get('agreement')}" for p in same]
-                  + [f"{p.get('arms')} max_abs_diff={p.get('max_abs_diff')} (tolerance {BATCH_TOL})" for p in batch])
+                  + [f"{p.get('arms')} max_abs_diff={p.get('max_abs_diff')} (tolerance {BATCH_TOL})" for p in batch]
+                  + [f"{p.get('arms')} {p.get('agreement')}" for p in cross])
         or 'no same-precision parity arm')
 
     delta = manifest.get('delta') or {}
     target = delta.get('target', delta.get('floor'))   # `floor` is what this key was called; read for one release
     measured = all(_finite(delta.get(f)) for f in ('delta', 'lo', 'hi'))
-    add(3, 'accuracy delta measured', measured,
+    int8 = (manifest.get('variant') or {}).get('precision') == 'int8'
+    quant = [(r.get('file'), r.get('quantization') or {}) for r in (manifest.get('rows') or [])] if int8 else []
+    quant_ok = all(_finite(q.get(f)) for _, q in quant for f in ('delta', 'lo', 'hi', 'agreement'))
+    add(3, 'accuracy delta measured', measured and quant_ok,
         (f"arms={delta['arms']} " if 'arms' in delta else '')   # the producer names the row it judged
         + f"delta={delta.get('delta')} lo={delta.get('lo')} hi={delta.get('hi')}"
         + (f" target={target} {'met' if measured and delta['lo'] > target else 'not demonstrated'}" if target is not None else '')
-        + ('' if measured else ' — no interval, so no verdict'))
+        + ('' if measured else ' — no interval, so no verdict')
+        + (''.join(f" quantization: {f}: delta={q['delta']} [{q['lo']}, {q['hi']}] agreement={q['agreement']}"
+                   for f, q in quant) if quant_ok
+           else ' — INT8 published without its quantization loss measured against the FP32 form'))
 
     add(4, 'exported file', *_onnx_conditions(d / 'model.onnx', (manifest.get('files') or {}).get('onnx')))
 
@@ -130,12 +139,12 @@ def run_gate(
     add(5, 'head and widths', head.get('expected') is not None and head.get('num_classes') == head.get('expected') and widths,
         f"num_classes={head.get('num_classes')} expected={head.get('expected')} widths={len(widths)} layers")
 
-    latency, measured = manifest.get('latency_rows'), manifest.get('rows') or []
-    missing = [f"row {i} has no {f}" for i, r in enumerate(measured) for f in ('bytes', 'peak_activation_bytes', 'macs')
+    latency, rows_measured = manifest.get('latency_rows'), manifest.get('rows') or []
+    missing = [f"row {i} has no {f}" for i, r in enumerate(rows_measured) for f in ('bytes', 'peak_activation_bytes', 'macs')
                if not (_is_count(r.get(f)) and r[f] >= 0)]
     add(6, 'size, memory, MACs and latency',
-        measured and not missing and ((isinstance(latency, list) and len(latency) > 0) or latency == 'non mesurée'),
-        '; '.join(missing) or (f"{len(measured)} rows measured, latency_rows="
+        rows_measured and not missing and ((isinstance(latency, list) and len(latency) > 0) or latency in UNMEASURED),
+        '; '.join(missing) or (f"{len(rows_measured)} rows measured, latency_rows="
                                + (f"{len(latency)} rows" if isinstance(latency, list) else f"{latency!r}")))
 
     card = d / 'README.md'
@@ -145,9 +154,9 @@ def run_gate(
     clean = manifest.get('clean_reload') or {}
     add(8, 'clean-machine reload', clean.get('passed'), f"clean reload {clean}" if clean else 'not run')
 
-    add(9, 'on-target claim', manifest.get('proof') or latency == 'non mesurée',
+    add(9, 'on-target claim', manifest.get('proof') or latency in UNMEASURED,
         'proof measured on the target' if manifest.get('proof') else
-        ('no on-target claim, latency non mesurée' if latency == 'non mesurée' else 'latency rows without a proof on the target'))
+        ('no on-target claim, latency not measured' if latency in UNMEASURED else 'latency rows without a proof on the target'))
     return rows
 
 

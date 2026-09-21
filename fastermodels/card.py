@@ -48,7 +48,7 @@ def _gap(artifact, reference):
 def render_card(
     meta: dict,  # name, base_model, license (a string, or id and validated_by), datasets, tags, scope_line, input_shape, rows, latency, provenance, optional recipe, ladder and gate, and reference: name, k, n, bytes, params, macs, peak_activation_bytes
 ) -> str:
-    "Render the model card: front matter, scope, the four criteria against the reference, latency and provenance"
+    "Render the model card: front matter, scope, the absolute top-1, the three criteria against the reference, latency and provenance"
     ref, latency = meta['reference'], meta.get('latency')
     missing = [f for f in ('name', 'k', 'n') if f not in ref]
     if missing: raise KeyError(f"meta['reference'] has no {missing} — the card names what it compares to, and on how many images")
@@ -65,35 +65,33 @@ def render_card(
     if meta.get('recipe'):
         out += ['## Recipe', ''] + [f"- `{k}`: {v}" for k, v in meta['recipe'].items()] + ['']
     out += ['## Criteria', '',
-            f"Top-1 on the evaluation set named above, size on disk, peak live activations and "
+            f"Top-1 on the evaluation set named above; size on disk, peak live activations and "
             f"multiply-accumulates — the last two for one image of {meta.get('input_shape', 'the evaluation resolution')} "
             f"at batch 1 — each against **{ref['name']}**.", '']
     for r in meta.get('rows', []):
+        w = r.get('wilson')
+        interval = f" [{100 * w[0]:.1f}, {100 * w[1]:.1f}]" if w else ''
         out += [f"### {r['artifact']} (`{r['file']}`)", '',
+                f"Top-1: {_top1(r['k'], r['n'])}{interval} on {r['n']} images", '',
                 '| criterion | reference | this artifact | gap |', '|---|---|---|---|',
-                f"| top-1 | {_top1(ref['k'], ref['n'])} | {_top1(r['k'], r['n'])} "
-                f"| {r['delta']:+.1f} pt [{r['lo']:+.1f}, {r['hi']:+.1f}] |",
                 f"| size | {_mb(ref.get('bytes'))}, {_millions(ref.get('params'))} params "
                 f"| {_mb(r.get('bytes'))}, {_millions(r.get('params'))} params "
                 f"| {_gap(r.get('bytes'), ref.get('bytes'))} |",
                 f"| memory | {_mb(ref.get('peak_activation_bytes'))} | {_mb(r.get('peak_activation_bytes'))} "
                 f"| {_gap(r.get('peak_activation_bytes'), ref.get('peak_activation_bytes'))} |",
                 f"| MACs | {_millions(ref.get('macs'))} | {_millions(r.get('macs'))} | {_gap(r.get('macs'), ref.get('macs'))} |"]
-        if r.get('target') is not None:   # a target the interval does not clear is not demonstrated, which is not a failure
-            why = 'the interval straddles the target' if r['hi'] > r['target'] else 'the interval is entirely below the target'
-            said = (f"met (lower bound {r['lo']:+.1f})" if r['lo'] > r['target']
-                    else f"not demonstrated (lower bound {r['lo']:+.1f}; {why})")
-            out += ['', f"Accuracy target: {r['target']:+.1f} pt — {said}"]
         for note in r.get('notes') or []: out += ['', note]
         out += ['']
     if meta.get('rows'):
-        out += ['Gaps are measured on the same images as the reference; brackets give the 95 % interval.', '']
+        out += ['Top-1 brackets give the 95 % interval over the evaluation images; size, memory and MACs gaps '
+                'are against the reference.', '']
     if meta.get('ladder'):
         out += ['## Variants', '', 'Other points on the same ladder, from the same source model:', '',
-                '| variant | repo | top-1 gap (pt), worst published form | size | memory | MACs |',
+                '| variant | repo | top-1, worst published form | size | memory | MACs |',
                 '|---|---|---|---|---|---|']
-        out += [f"| {v['name']} | `{v['repo']}` | {v['delta']:+.1f} | {_mb(v.get('bytes'))} "
-                f"| {_mb(v.get('peak_activation_bytes'))} | {_millions(v.get('macs'))} |" for v in meta['ladder']]
+        out += [f"| {v['name']} | `{v['repo']}` | {_top1(v['k'], v['n']) if {'k', 'n'} <= v.keys() else 'n/a'} "
+                f"| {_mb(v.get('bytes'))} | {_mb(v.get('peak_activation_bytes'))} | {_millions(v.get('macs'))} |"
+                for v in meta['ladder']]
         out += ['']
     out += ['## Latency', '']
     if not latency: out += ['not measured']
@@ -107,7 +105,7 @@ def render_card(
     if meta.get('gate'):
         failed = [g['name'] for g in meta['gate'] if not g['passed']]
         out += ['', f"Publication checks: {len(meta['gate']) - len(failed)}/{len(meta['gate'])} structural "
-                    "checks passed (they do not include the accuracy target, whose verdict is in each table above)."
+                    "checks passed."
                     + (f" Not passed: {', '.join(failed)}." if failed else '')]
     return '\n'.join(out) + '\n'
 

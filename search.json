@@ -1,0 +1,251 @@
+[
+  {
+    "objectID": "tutorials/load_and_check.html",
+    "href": "tutorials/load_and_check.html",
+    "title": "Load a model from the Hub and check its card",
+    "section": "",
+    "text": "FasterAI-Labs/pilot-resnet18-imagenette is a ResNet-18 pruned with fasterai, quantized to INT8 and fine-tuned on Imagenette. Its card reports a top-1 for each of the three files the repo publishes, plus the size and the cost of one forward. Every number on this page is one the card reports, recomputed here from the downloaded files — the repo is private today, so read the page as what a card promises and how a reader checks it.\nfastermodels itself depends only on torch, huggingface_hub, safetensors and numpy; fastai is here for the Imagenette loader, and onnxruntime for the last cell.\nEverything this page needs comes from one import.\nimport torch\n\nfrom fastermodels import load, correct_vector, predictions, wilson, agreement, params, macs, peak_activation_bytes\nload downloads the repo and gives back the form it publishes first — here the weights, as a FasterModel in eval mode.\nrepo = 'FasterAI-Labs/pilot-resnet18-imagenette'\nmodel = load(repo)\n\nprint(type(model).__name__, '— training:', model.training)\nprint(model.provenance)\n\nFasterModel — training: False\n{'fasterai': '0.4.0', 'fastermodels': '0.1.0', 'measured_on': '2026-09-11', 'source_state_hash': 'b81b9caef3c9', 'torch': '2.9.1+cu128'}\nA pruned ResNet no longer has the shapes torchvision.models.resnet18 builds, so the weights alone would not load. The repo’s config.json carries the factory to call and the constructor arguments of every layer whose shape changed; load rebuilds that architecture first, then reads the weights into it strictly. The first convolution is the visible case: the factory builds conv1 with 64 output channels, the artifact has 40 — both printed below.\nimport json\nfrom huggingface_hub import hf_hub_download\n\ncfg = json.load(open(hf_hub_download(repo, 'config.json')))\nprint(cfg['source'], cfg['source_kwargs'])\nprint(cfg['modules']['conv1'])\nprint(model.net.conv1)\nfrom torchvision.models import resnet18\nprint('factory:', resnet18(num_classes=10).conv1)\n\ntorchvision.models.resnet18 {'num_classes': 10, 'weights': None}\n{'bias': False, 'dilation': [1, 1], 'groups': 1, 'in_channels': 3, 'kernel_size': [7, 7], 'out_channels': 40, 'padding': [3, 3], 'padding_mode': 'zeros', 'stride': [2, 2], 'type': 'Conv2d'}\nConv2d(3, 40, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)\nfactory: Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)\nThe card names its evaluation set and its preprocessing: Imagenette validation at 160 px, normalized with the ImageNet statistics.\nfrom fastai.vision.all import ImageDataLoaders, Normalize, Resize, URLs, imagenet_stats, untar_data\n\npath = untar_data(URLs.IMAGENETTE_160)\ndls = ImageDataLoaders.from_folder(path, valid='val', item_tfms=Resize(160),\n                                   batch_tfms=Normalize.from_stats(*imagenet_stats), bs=64)\nprint(len(dls.valid_ds), 'validation images')\n\n3925 validation images\ncorrect_vector scores one image at a time, so the count is exact and wilson can put an interval around it.\ncorrect = correct_vector(model, dls.valid)\nk, n = int(correct.sum()), len(correct)\nlo, hi = wilson(k, n)\nprint(f\"{k}/{n} = {100*k/n:.1f} %  [{100*lo:.1f}, {100*hi:.1f}]\")\n\n3589/3925 = 91.4 %  [90.5, 92.3]\nWhat one forward costs, at batch 1, on the same image size.\nx = torch.zeros(1, 3, 160, 160)\n\nprint(f\"{params(model)/1e6:.1f} M params\")\nprint(f\"{macs(model, x)/1e6:.1f} M MACs\")\nprint(f\"{peak_activation_bytes(model, x)/1e6:.1f} MB peak activations\")\n\n5.3 M params\n425.8 M MACs\n2.0 MB peak activations\nThe same repo publishes the INT8 model as TorchScript: load(repo, form='torchscript') returns a frozen module that runs like any other callable. agreement says how often the two files predict the same class, which is a stricter reading than two top-1 numbers that happen to be close.\nint8 = load(repo, form='torchscript')\n\nc8 = correct_vector(int8, dls.valid)\nprint(f\"{int(c8.sum())}/{len(c8)} = {100*c8.mean():.1f} %\")\nprint(f\"agreement with the FP32 file: {100*agreement(predictions(model, dls.valid), predictions(int8, dls.valid)):.1f} %\")\n\n3584/3925 = 91.3 %\nagreement with the FP32 file: 99.4 %\nThe third file is INT8 ONNX. load returns its path, and the runtime is the reader’s choice — anything callable on a batch is scored by the same harness. It is a different runtime from the one above, so a small disagreement with the TorchScript file is expected.\nimport onnxruntime as ort\n\nonnx_path = load(repo, form='onnx')\nsess = ort.InferenceSession(str(onnx_path), providers=['CPUExecutionProvider'])\nf = lambda x: torch.from_numpy(sess.run(None, {'input': x.numpy()})[0])\n\nc_onnx = correct_vector(f, dls.valid)\nprint(f\"{int(c_onnx.sum())}/{len(c_onnx)} = {100*c_onnx.mean():.1f} %\")\n\n3580/3925 = 91.2 %",
+    "crumbs": [
+      "Tutorials",
+      "Load a model from the Hub and check its card"
+    ]
+  },
+  {
+    "objectID": "tutorials/load_and_check.html#summary",
+    "href": "tutorials/load_and_check.html#summary",
+    "title": "Load a model from the Hub and check its card",
+    "section": "Summary",
+    "text": "Summary\n\n\n\nFunction\nWhat it gave here\n\n\n\n\nload\nthe three published forms: FasterModel, TorchScript module, ONNX path\n\n\ncorrect_vector + wilson\ntop-1 as a count out of 3925, with a 95 % interval\n\n\nparams, macs, peak_activation_bytes\n5.3 M params, 425.8 M MACs, 2.0 MB of activations at batch 1\n\n\nagreement\n99.4 % of images given the same class by the FP32 and INT8 files\n\n\n\n\n\n\n\n\n\n\n\nArtifact\nCard\nRecomputed here\n\n\n\n\npruned FP32 (model.safetensors)\n91.4 %\n91.4 % (3589/3925)\n\n\nINT8 TorchScript (model.torchscript.pt)\n91.3 %\n91.3 % (3584/3925)\n\n\nINT8 ONNX (model.onnx)\n91.2 %\n91.2 % (3580/3925)",
+    "crumbs": [
+      "Tutorials",
+      "Load a model from the Hub and check its card"
+    ]
+  },
+  {
+    "objectID": "tutorials/load_and_check.html#see-also",
+    "href": "tutorials/load_and_check.html#see-also",
+    "title": "Load a model from the Hub and check its card",
+    "section": "See Also",
+    "text": "See Also\n\nModel - FasterModel and load\nEval - the harness behind the numbers on this page\nCard - what a card contains\nGate - the checks an artifact passes before publication",
+    "crumbs": [
+      "Tutorials",
+      "Load a model from the Hub and check its card"
+    ]
+  },
+  {
+    "objectID": "gate.html",
+    "href": "gate.html",
+    "title": "Gate",
+    "section": "",
+    "text": "The gate reads the artifact that was produced, not the intentions of the script that produced it: it reloads the weights in a fresh interpreter, reads the exported ONNX back, and reads the card back. The reload goes through load, so a variant published in INT8 only — a TorchScript file and no safetensors — is reloaded, run on one zero image to prove it executes, and its file digest compared to the manifest.\n\n\n\n#\nCondition\nPasses when\n\n\n\n\n0\nlicense\nthe license has an id and the name that validated it\n\n\n1\nfresh-interpreter reload\na scrubbed subprocess reloads the form the artifact publishes, to the published hash\n\n\n2\nparity\nevery same-precision arm agrees on at least 99.5 % of the images, and every batch-invariance arm differs by at most BATCH_TOL; cross-precision arms are recorded and printed, not thresholded\n\n\n3\naccuracy delta measured\nthe paired delta carries a finite interval; whether its target is demonstrated is reported, not judged. An INT8 variant also carries, on every row, the quantization step measured against the artifact’s own FP32 form\n\n\n4\nexported file\nthe ONNX the manifest claims is there, with opset 17, a dynamic batch and its Q/DQ pairs\n\n\n5\nhead and widths\nthe head has the expected number of classes and the widths are recorded\n\n\n6\nsize, memory, MACs and latency\nevery row carries size, memory and MACs as non-negative ints, and there are latency rows or the not measured sentinel (the old spelling non mesurée is still read for one release)\n\n\n7\ncard\nthe README is there and check_card flags nothing\n\n\n8\nclean-machine reload\na clean machine reloaded the artifact and got the same result\n\n\n9\non-target claim\nlatency rows come with a proof measured on the target\n\n\n\nThe gate guards the integrity of the measurement, not the size of the effect: condition 3 asks that the delta was measured with a finite interval and reports whether the target is demonstrated — the lower bound clears it — or not demonstrated, which says something about the evidence and not about the model. A variant whose interval does not clear its target is publishable: more compressed variants of one model serve more constrained uses, and the card says where each one lands.\nA number that is missing is not a pass: condition 3 fails when there is no lo to read, and condition 6 fails naming the criterion a row does not carry.\nBATCH_TOL is 1e-3 because a float32 CPU model is not bit-exact across batch sizes: measured on this harness, resnet18 differs by 4.29e-06 between batch 1 and batch 32 and mobilenet_v3_large by 1.24e-05 (the convolution path depends on the batch size), while the same models exported to TorchScript INT8 differ by exactly 0. What the condition catches — a BatchNorm left in training mode, an export pinned to one batch size — moves the outputs by order 1.\n\n\nsource\n\n\ndef run_gate(\n    artifact_dir:str | Path, # directory holding config.json, model.safetensors and README.md\n    manifest:dict, # what the producer claims about the artifact\n    *, python:str | None=None, # interpreter of the fresh-interpreter reload (default: this one)\n    pythonpath:str | None=None, # the only PYTHONPATH that reload is given\n)-&gt;list[GateRow]:\nRun the ten publication conditions on a local artifact directory\n\n\n\n\nsource\n\n\ndef GateRow(\n    condition:int, name:str, passed:bool, evidence:str\n)-&gt;None:\nOne publication condition and what it found\n\n\n\n\nsource\n\n\ndef gate_passed(\n    rows:list[GateRow], # what `run_gate` returned\n)-&gt;bool:\nTrue when every condition passed",
+    "crumbs": [
+      "API",
+      "Gate"
+    ]
+  },
+  {
+    "objectID": "gate.html#overview",
+    "href": "gate.html#overview",
+    "title": "Gate",
+    "section": "",
+    "text": "The gate reads the artifact that was produced, not the intentions of the script that produced it: it reloads the weights in a fresh interpreter, reads the exported ONNX back, and reads the card back. The reload goes through load, so a variant published in INT8 only — a TorchScript file and no safetensors — is reloaded, run on one zero image to prove it executes, and its file digest compared to the manifest.\n\n\n\n#\nCondition\nPasses when\n\n\n\n\n0\nlicense\nthe license has an id and the name that validated it\n\n\n1\nfresh-interpreter reload\na scrubbed subprocess reloads the form the artifact publishes, to the published hash\n\n\n2\nparity\nevery same-precision arm agrees on at least 99.5 % of the images, and every batch-invariance arm differs by at most BATCH_TOL; cross-precision arms are recorded and printed, not thresholded\n\n\n3\naccuracy delta measured\nthe paired delta carries a finite interval; whether its target is demonstrated is reported, not judged. An INT8 variant also carries, on every row, the quantization step measured against the artifact’s own FP32 form\n\n\n4\nexported file\nthe ONNX the manifest claims is there, with opset 17, a dynamic batch and its Q/DQ pairs\n\n\n5\nhead and widths\nthe head has the expected number of classes and the widths are recorded\n\n\n6\nsize, memory, MACs and latency\nevery row carries size, memory and MACs as non-negative ints, and there are latency rows or the not measured sentinel (the old spelling non mesurée is still read for one release)\n\n\n7\ncard\nthe README is there and check_card flags nothing\n\n\n8\nclean-machine reload\na clean machine reloaded the artifact and got the same result\n\n\n9\non-target claim\nlatency rows come with a proof measured on the target\n\n\n\nThe gate guards the integrity of the measurement, not the size of the effect: condition 3 asks that the delta was measured with a finite interval and reports whether the target is demonstrated — the lower bound clears it — or not demonstrated, which says something about the evidence and not about the model. A variant whose interval does not clear its target is publishable: more compressed variants of one model serve more constrained uses, and the card says where each one lands.\nA number that is missing is not a pass: condition 3 fails when there is no lo to read, and condition 6 fails naming the criterion a row does not carry.\nBATCH_TOL is 1e-3 because a float32 CPU model is not bit-exact across batch sizes: measured on this harness, resnet18 differs by 4.29e-06 between batch 1 and batch 32 and mobilenet_v3_large by 1.24e-05 (the convolution path depends on the batch size), while the same models exported to TorchScript INT8 differ by exactly 0. What the condition catches — a BatchNorm left in training mode, an export pinned to one batch size — moves the outputs by order 1.\n\n\nsource\n\n\ndef run_gate(\n    artifact_dir:str | Path, # directory holding config.json, model.safetensors and README.md\n    manifest:dict, # what the producer claims about the artifact\n    *, python:str | None=None, # interpreter of the fresh-interpreter reload (default: this one)\n    pythonpath:str | None=None, # the only PYTHONPATH that reload is given\n)-&gt;list[GateRow]:\nRun the ten publication conditions on a local artifact directory\n\n\n\n\nsource\n\n\ndef GateRow(\n    condition:int, name:str, passed:bool, evidence:str\n)-&gt;None:\nOne publication condition and what it found\n\n\n\n\nsource\n\n\ndef gate_passed(\n    rows:list[GateRow], # what `run_gate` returned\n)-&gt;bool:\nTrue when every condition passed",
+    "crumbs": [
+      "API",
+      "Gate"
+    ]
+  },
+  {
+    "objectID": "gate.html#usage",
+    "href": "gate.html#usage",
+    "title": "Gate",
+    "section": "Usage",
+    "text": "Usage\nfrom fastermodels import run_gate, gate_passed\n\nrows = run_gate('artifact', manifest, python=sys.executable, pythonpath='/path/to/fastermodels')\nfor r in rows: print(f\"{r.condition} {r.name:26} {'pass' if r.passed else 'FAIL'}  {r.evidence}\")\ngate_passed(rows)\n0 license                    pass  id='bsd-3-clause' validated by 'nathan'\n1 fresh-interpreter reload   pass  reloaded 6f3c... vs manifest 6f3c...\n2 parity                     pass  ['in-memory', 'safetensors'] 1.0; ['batch 1', 'batch 32'] max_abs_diff=1e-07\n3 accuracy delta measured    pass  arms=INT8 ONNX vs reference delta=-0.51 lo=-1.2 hi=0.2 target=-2.0 met\n6 size, memory, MACs and ... pass  1 rows measured, latency_rows='not measured'\n...\nThe reload of condition 1 runs with PYTHONPATH set to that one path and nothing else, so it fails if the artifact only reloads thanks to something in the producer’s environment.",
+    "crumbs": [
+      "API",
+      "Gate"
+    ]
+  },
+  {
+    "objectID": "gate.html#see-also",
+    "href": "gate.html#see-also",
+    "title": "Gate",
+    "section": "See Also",
+    "text": "See Also\n\nModel - state_hash, the digest condition 1 compares\nCard - check_card, which condition 7 runs\nEval - the paired interval condition 3 reads\n\nTests live in nbs/tests/test_gate.ipynb.",
+    "crumbs": [
+      "API",
+      "Gate"
+    ]
+  },
+  {
+    "objectID": "eval.html",
+    "href": "eval.html",
+    "title": "Eval",
+    "section": "",
+    "text": "An accuracy published alone is not comparable to anything. This harness keeps the per-image result, so two models evaluated on the same images can be compared as a paired sample instead of two lonely numbers.\n\n\n\nFunction\nCriterion it answers\n\n\n\n\ncorrect_vector, wilson\ntop-1: which images this model gets right, and how wide the interval around k/n is\n\n\npaired_delta\ntop-1 again: is the difference with the reference distinguishable from zero\n\n\nparams\nsize: how many weights, packed quantized weights included\n\n\npeak_activation_bytes\nmemory: the peak of live activations for one image\n\n\nmacs\ncompute: multiply-accumulates for one image\n\n\nagreement\ndo two artifacts of the same model predict the same class (a parity check, not a card criterion)\n\n\n\nA NaN logit, an empty dataloader or a model left in training mode raises: a silent wrong number is worse than a stack trace. The harness never moves the model, only the batches — the model must already be on device. Anything callable on a batch is scored, a TorchScript module and an ONNX session included; macs and peak_activation_bytes read a nn.Module or an FX GraphModule, and say so when they cannot.\n\n\nsource\n\n\ndef predictions(\n    model:Callable, # a model, or anything callable on a batch of inputs\n    dl, # dataloader yielding (inputs, targets)\n    device:str | torch.device='cpu', # device the batches are moved to; the model must already live there\n)-&gt;np.ndarray:\nPredicted class of every image, in dataloader order\n\n\n\n\nsource\n\n\ndef correct_vector(\n    model:Callable, # a model, or anything callable on a batch of inputs\n    dl, # dataloader yielding (inputs, targets)\n    device:str | torch.device='cpu', # device the batches are moved to; the model must already live there\n)-&gt;np.ndarray:\nPer-image correctness, in dataloader order\n\n\n\n\nsource\n\n\ndef wilson(\n    k:int, # images classified correctly\n    n:int, # images evaluated\n    z:float=1.96, # 1.96 for a 95 % interval\n)-&gt;tuple[float, float]:\nWilson score interval of an accuracy, as fractions\n\n\n\n\nsource\n\n\ndef paired_delta(\n    a:np.ndarray, # per-image correctness of the reference\n    b:np.ndarray, # per-image correctness of the model compared to it\n    n_boot:int=2000, # bootstrap resamples over the images\n    seed:int=0, # seed of the resampling\n)-&gt;PairedDelta:\nAccuracy difference b - a in points, with a paired bootstrap interval and the exact McNemar p\n\n\n\n\nsource\n\n\ndef PairedDelta(\n    delta:float, lo:float, hi:float, p_mcnemar:float, n:int\n)-&gt;None:\nAccuracy difference between two models evaluated on the same images, in percentage points\n\n\n\n\nsource\n\n\ndef agreement(\n    pred_a:np.ndarray, # predicted classes of one artifact\n    pred_b:np.ndarray, # predicted classes of the other\n)-&gt;float:\nFraction of images on which two artifacts predict the same class\n\n\n\n\nsource\n\n\ndef params(\n    model:nn.Module, # the model to weigh\n)-&gt;int:\nNumber of weights; a quantized module keeps its weight packed outside parameters(), so it is counted apart (its bias is not)\n\n\n\n\nsource\n\n\ndef macs(\n    model:nn.Module, # the model to count, in eval mode\n    sample:torch.Tensor, # a batch; only its first image is used\n)-&gt;int:\nMultiply-accumulates of one forward at batch 1, over convolutions and linear layers only — normalisation, activations, pooling and additions are not counted\n\n\n\n\nsource\n\n\ndef peak_activation_bytes(\n    model:nn.Module, # the model to measure, in eval mode\n    sample:torch.Tensor, # a batch; only its first image is used\n)-&gt;int:\nPeak bytes of the activations alive at once during one forward at batch 1; weights are size, not memory of work, so they are not counted",
+    "crumbs": [
+      "API",
+      "Eval"
+    ]
+  },
+  {
+    "objectID": "eval.html#overview",
+    "href": "eval.html#overview",
+    "title": "Eval",
+    "section": "",
+    "text": "An accuracy published alone is not comparable to anything. This harness keeps the per-image result, so two models evaluated on the same images can be compared as a paired sample instead of two lonely numbers.\n\n\n\nFunction\nCriterion it answers\n\n\n\n\ncorrect_vector, wilson\ntop-1: which images this model gets right, and how wide the interval around k/n is\n\n\npaired_delta\ntop-1 again: is the difference with the reference distinguishable from zero\n\n\nparams\nsize: how many weights, packed quantized weights included\n\n\npeak_activation_bytes\nmemory: the peak of live activations for one image\n\n\nmacs\ncompute: multiply-accumulates for one image\n\n\nagreement\ndo two artifacts of the same model predict the same class (a parity check, not a card criterion)\n\n\n\nA NaN logit, an empty dataloader or a model left in training mode raises: a silent wrong number is worse than a stack trace. The harness never moves the model, only the batches — the model must already be on device. Anything callable on a batch is scored, a TorchScript module and an ONNX session included; macs and peak_activation_bytes read a nn.Module or an FX GraphModule, and say so when they cannot.\n\n\nsource\n\n\ndef predictions(\n    model:Callable, # a model, or anything callable on a batch of inputs\n    dl, # dataloader yielding (inputs, targets)\n    device:str | torch.device='cpu', # device the batches are moved to; the model must already live there\n)-&gt;np.ndarray:\nPredicted class of every image, in dataloader order\n\n\n\n\nsource\n\n\ndef correct_vector(\n    model:Callable, # a model, or anything callable on a batch of inputs\n    dl, # dataloader yielding (inputs, targets)\n    device:str | torch.device='cpu', # device the batches are moved to; the model must already live there\n)-&gt;np.ndarray:\nPer-image correctness, in dataloader order\n\n\n\n\nsource\n\n\ndef wilson(\n    k:int, # images classified correctly\n    n:int, # images evaluated\n    z:float=1.96, # 1.96 for a 95 % interval\n)-&gt;tuple[float, float]:\nWilson score interval of an accuracy, as fractions\n\n\n\n\nsource\n\n\ndef paired_delta(\n    a:np.ndarray, # per-image correctness of the reference\n    b:np.ndarray, # per-image correctness of the model compared to it\n    n_boot:int=2000, # bootstrap resamples over the images\n    seed:int=0, # seed of the resampling\n)-&gt;PairedDelta:\nAccuracy difference b - a in points, with a paired bootstrap interval and the exact McNemar p\n\n\n\n\nsource\n\n\ndef PairedDelta(\n    delta:float, lo:float, hi:float, p_mcnemar:float, n:int\n)-&gt;None:\nAccuracy difference between two models evaluated on the same images, in percentage points\n\n\n\n\nsource\n\n\ndef agreement(\n    pred_a:np.ndarray, # predicted classes of one artifact\n    pred_b:np.ndarray, # predicted classes of the other\n)-&gt;float:\nFraction of images on which two artifacts predict the same class\n\n\n\n\nsource\n\n\ndef params(\n    model:nn.Module, # the model to weigh\n)-&gt;int:\nNumber of weights; a quantized module keeps its weight packed outside parameters(), so it is counted apart (its bias is not)\n\n\n\n\nsource\n\n\ndef macs(\n    model:nn.Module, # the model to count, in eval mode\n    sample:torch.Tensor, # a batch; only its first image is used\n)-&gt;int:\nMultiply-accumulates of one forward at batch 1, over convolutions and linear layers only — normalisation, activations, pooling and additions are not counted\n\n\n\n\nsource\n\n\ndef peak_activation_bytes(\n    model:nn.Module, # the model to measure, in eval mode\n    sample:torch.Tensor, # a batch; only its first image is used\n)-&gt;int:\nPeak bytes of the activations alive at once during one forward at batch 1; weights are size, not memory of work, so they are not counted",
+    "crumbs": [
+      "API",
+      "Eval"
+    ]
+  },
+  {
+    "objectID": "eval.html#usage",
+    "href": "eval.html#usage",
+    "title": "Eval",
+    "section": "Usage",
+    "text": "Usage\nfrom fastermodels import correct_vector, wilson, paired_delta, predictions, agreement\n\nref = correct_vector(source_model, valid_dl)\nopt = correct_vector(FasterModel.from_pretrained('artifact'), valid_dl)\n\nk, n = int(opt.sum()), opt.size\nwilson(k, n)                 # (0.9298, 0.9448) — the interval that belongs next to k/n\npaired_delta(ref, opt)       # PairedDelta(delta=-0.51, lo=-1.2, hi=0.2, p_mcnemar=0.12, n=3925)\nagreement(predictions(source_model, valid_dl), predictions(reloaded, valid_dl))\npaired_delta compares the two vectors image by image, so it reads a small difference the two intervals would leave undecided. lo &gt; floor is the publication condition; delta alone is not.\nThe three other criteria are read off the model itself, for one image:\nfrom fastermodels import params, macs, peak_activation_bytes\n\nparams(fm)                             # 8_900_000 weights\nmacs(fm, sample)                       # multiply-accumulates for one image\npeak_activation_bytes(fm, sample)      # bytes of activations alive at once\nmacs counts convolutions and linear layers, nothing else. peak_activation_bytes walks the FX graph and keeps a live set, so an in-place operation reuses its input’s buffer instead of adding one; a model that cannot be traced raises rather than reporting 0.",
+    "crumbs": [
+      "API",
+      "Eval"
+    ]
+  },
+  {
+    "objectID": "eval.html#see-also",
+    "href": "eval.html#see-also",
+    "title": "Eval",
+    "section": "See Also",
+    "text": "See Also\n\nModel - the model these numbers are measured on\nCard - where k, n, the interval and the delta are written down\nGate - the condition that reads lo against the floor\n\nTests live in nbs/tests/test_eval.ipynb.",
+    "crumbs": [
+      "API",
+      "Eval"
+    ]
+  },
+  {
+    "objectID": "model.html",
+    "href": "model.html",
+    "title": "Model",
+    "section": "",
+    "text": "An optimized model no longer has the shapes its factory builds: pruning changes channel counts, and those counts are the only thing standing between a checkpoint and a model that loads. FasterModel publishes both — the factory that builds the architecture, and the rebuild spec of the layers whose shapes changed.\n\n\n\nPiece\nWhat it is\nWhere it goes\n\n\n\n\nsource\ndotted path of the factory, torchvision.models.resnet18\nconfig.json\n\n\nsource_kwargs\nwhat the factory is called with, e.g. {'num_classes': 10, 'weights': None}\nconfig.json\n\n\nmodules\nconstructor arguments of every shape-carrying leaf, from spec_from\nconfig.json\n\n\nweights\nthe optimized weights, under the net. prefix\nmodel.safetensors\n\n\n\nsave_pretrained / from_pretrained come from PyTorchModelHubMixin, so a directory or a Hub repo id work the same way. Loading is always strict: a spec that disagrees with the weights raises instead of loading in part. wrap and from_pretrained both return the model in eval mode, so a forward pass reads the published BatchNorm statistics instead of the statistics of the batch it was given.\n\n\nsource\n\n\ndef resolve(\n    source:str, # dotted path of a model factory, e.g. 'torchvision.models.resnet18'\n)-&gt;Callable:\nImport the model factory source points to\n\n\n\n\nsource\n\n\ndef spec_from(\n    model:nn.Module, # model whose optimized layers are recorded\n)-&gt;dict:\nRebuild spec: the constructor arguments of every Conv2d, Linear and BatchNorm leaf, read off the live model\n\n\n\n\nsource\n\n\ndef state_hash(\n    obj:nn.Module | dict, # a model or a state dict\n)-&gt;str:\nsha256 over every state dict entry: key, shape, dtype and raw bytes\n\n\n\n\nsource\n\n\ndef FasterModel(\n    source:str, # dotted path of the model factory\n    source_kwargs:dict | None=None, # arguments the factory is called with\n    modules:dict | None=None, # rebuild spec, as returned by `spec_from`\n    recipe:dict | None=None, # the steps that produced the weights\n    provenance:dict | None=None, # versions, commits, weights the source started from\n):\nA model optimized by fasterai: a source factory, the rebuild spec of its layers, and its weights\n\n\n\n\nsource\n\n\ndef wrap(\n    model:nn.Module, # the optimized model to publish\n    source:str, # dotted path of the model factory it came from\n    source_kwargs:dict | None=None, # arguments the factory is called with\n    recipe:dict | None=None, # the steps that produced the weights\n    provenance:dict | None=None, # versions, commits, weights the source started from\n)-&gt;\"'FasterModel'\":\nWrap an optimized model, reading its rebuild spec off its layers; returned in eval mode\n\n\n\n\nsource\n\n\ndef load(\n    repo_id:str, # a Hub repo id, or a local artifact directory\n    form:str='auto', # 'auto', or one of 'safetensors', 'torchscript', 'onnx'\n    **kw\n):\nLoad the form a repo publishes: a FasterModel, a TorchScript module, or the path of the ONNX file",
+    "crumbs": [
+      "API",
+      "Model"
+    ]
+  },
+  {
+    "objectID": "model.html#overview",
+    "href": "model.html#overview",
+    "title": "Model",
+    "section": "",
+    "text": "An optimized model no longer has the shapes its factory builds: pruning changes channel counts, and those counts are the only thing standing between a checkpoint and a model that loads. FasterModel publishes both — the factory that builds the architecture, and the rebuild spec of the layers whose shapes changed.\n\n\n\nPiece\nWhat it is\nWhere it goes\n\n\n\n\nsource\ndotted path of the factory, torchvision.models.resnet18\nconfig.json\n\n\nsource_kwargs\nwhat the factory is called with, e.g. {'num_classes': 10, 'weights': None}\nconfig.json\n\n\nmodules\nconstructor arguments of every shape-carrying leaf, from spec_from\nconfig.json\n\n\nweights\nthe optimized weights, under the net. prefix\nmodel.safetensors\n\n\n\nsave_pretrained / from_pretrained come from PyTorchModelHubMixin, so a directory or a Hub repo id work the same way. Loading is always strict: a spec that disagrees with the weights raises instead of loading in part. wrap and from_pretrained both return the model in eval mode, so a forward pass reads the published BatchNorm statistics instead of the statistics of the batch it was given.\n\n\nsource\n\n\ndef resolve(\n    source:str, # dotted path of a model factory, e.g. 'torchvision.models.resnet18'\n)-&gt;Callable:\nImport the model factory source points to\n\n\n\n\nsource\n\n\ndef spec_from(\n    model:nn.Module, # model whose optimized layers are recorded\n)-&gt;dict:\nRebuild spec: the constructor arguments of every Conv2d, Linear and BatchNorm leaf, read off the live model\n\n\n\n\nsource\n\n\ndef state_hash(\n    obj:nn.Module | dict, # a model or a state dict\n)-&gt;str:\nsha256 over every state dict entry: key, shape, dtype and raw bytes\n\n\n\n\nsource\n\n\ndef FasterModel(\n    source:str, # dotted path of the model factory\n    source_kwargs:dict | None=None, # arguments the factory is called with\n    modules:dict | None=None, # rebuild spec, as returned by `spec_from`\n    recipe:dict | None=None, # the steps that produced the weights\n    provenance:dict | None=None, # versions, commits, weights the source started from\n):\nA model optimized by fasterai: a source factory, the rebuild spec of its layers, and its weights\n\n\n\n\nsource\n\n\ndef wrap(\n    model:nn.Module, # the optimized model to publish\n    source:str, # dotted path of the model factory it came from\n    source_kwargs:dict | None=None, # arguments the factory is called with\n    recipe:dict | None=None, # the steps that produced the weights\n    provenance:dict | None=None, # versions, commits, weights the source started from\n)-&gt;\"'FasterModel'\":\nWrap an optimized model, reading its rebuild spec off its layers; returned in eval mode\n\n\n\n\nsource\n\n\ndef load(\n    repo_id:str, # a Hub repo id, or a local artifact directory\n    form:str='auto', # 'auto', or one of 'safetensors', 'torchscript', 'onnx'\n    **kw\n):\nLoad the form a repo publishes: a FasterModel, a TorchScript module, or the path of the ONNX file",
+    "crumbs": [
+      "API",
+      "Model"
+    ]
+  },
+  {
+    "objectID": "model.html#usage",
+    "href": "model.html#usage",
+    "title": "Model",
+    "section": "Usage",
+    "text": "Usage\nPublish a model you just optimized:\nfrom fastermodels import FasterModel\n\nfm = FasterModel.wrap(pruned, 'torchvision.models.resnet18', {'num_classes': 10, 'weights': None},\n                      recipe={'prune': 'ratio 0.3, local, round_to 8'})\nfm.save_pretrained('artifact')            # config.json + model.safetensors\nfm.push_to_hub('FasterAI-Labs/my-model')  # the same two files, on the Hub\nLoad back whatever a repo publishes, from a directory or from the Hub:\nfrom fastermodels import load\n\nmodel = load('FasterAI-Labs/my-model')    # safetensors, else TorchScript, else the ONNX path\nload('artifact', form='torchscript')      # or name the form you want\nA variant published in INT8 only has no model.safetensors, so load looks for model.safetensors, then model.torchscript.pt, then model.onnx, and raises naming the three when a repo has none of them. The first two come back ready to call; the ONNX comes back as a path, for the runtime of your choice.\nWhen the repo does publish weights, FasterModel reads them directly:\nfm = FasterModel.from_pretrained('artifact')\nfm(x)                                     # delegates to fm.net, in eval mode\nfm.recipe                                 # what produced these weights\nstate_hash(fm)                            # the same digest the producer published\nsource_kwargs never carries pretrained weights ('weights': None): loading an artifact downloads nothing but the artifact itself, and the weights the optimization started from are recorded in provenance.",
+    "crumbs": [
+      "API",
+      "Model"
+    ]
+  },
+  {
+    "objectID": "model.html#see-also",
+    "href": "model.html#see-also",
+    "title": "Model",
+    "section": "See Also",
+    "text": "See Also\n\nEval - the per-image harness the published numbers come from\nCard - what the artifact says about itself\nGate - the conditions an artifact meets before publication\n\nTests live in nbs/tests/test_model.ipynb.",
+    "crumbs": [
+      "API",
+      "Model"
+    ]
+  },
+  {
+    "objectID": "card.html",
+    "href": "card.html",
+    "title": "Card",
+    "section": "",
+    "text": "The reference is named on the card, so meta['reference'] carries a name, the k/n it was measured on, and the same criteria as a row (bytes, params, macs, peak_activation_bytes); without the first three render_card raises rather than compare to something anonymous.\nA row carries the k and n its top-1 was measured on and, when the producer measured one, the wilson interval around it, as the pair of fractions the harness returns. Anything else a row carries — a delta against the reference, its bounds, a target the variant aimed for — is ignored: the card reports the top-1 the artifact reaches, not a gap on it, and it names no objective. meta['ladder'] lists the sibling variants of the same source model so a reader can pick the point that suits them; the top-1 it shows is the worst published form of each repository, which is what the header says, and a variant without a count reads n/a. A row may also carry notes, each sentence rendered as its own paragraph under the row’s table.\nThe front matter carries a license: key only once a person has validated it: with license={'id': ..., 'validated_by': ''} the key is left out and the provenance block says the license is not yet validated, so the Hub never shows a license nobody checked. base_model: follows the same rule for a different reason — the Hub only accepts one of its own model ids there, so a source named by its factory (torchvision.models.resnet18 (IMAGENET1K_V1)) is written as Source model in the provenance block instead, where it says as much and breaks nothing.\nThe card carries four criteria and nothing else: top-1, size (on disk and in weights), memory (peak live activations for one image) and MACs. The top-1 is absolute — the accuracy this artifact reaches, with its 95 % interval in brackets and the number of images it was measured on, above the table and never against a reference. The other three are shown three times — the reference, this artifact, and the gap between them — so a number is never read alone. Sizes are megabytes, counts are millions. The gap is a signed percentage, never an N× ratio: a model that is 74 % smaller is not a model that runs four times faster.\nrecipe is optional — what produced the weights belongs on the card only when it helps the reader — and so is gate: pass the rows run_gate returned and the card carries one line, Publication checks: 10/10 structural checks passed., without their evidence, which belongs in the run log. The line names what it counts: the conditions are structural — no accuracy verdict hides behind the count.\nrender_card writes the card from measured values only: every number in it comes from meta, there is no default that could be mistaken for a measurement. A reference value the producer did not measure renders n/a, and a latency that was not measured is written not measured, never 0.\ncheck_card reads a card back and returns what a reader should not have to trust: the phrases in FORBIDDEN, and any speedup claim on a line that does not name both a device and a runtime — 2.3x faster says nothing, and so does 2.3x on CPU; 2.3x on CPU with onnxruntime says where it was measured.\n\n\nsource\n\n\ndef render_card(\n    meta:dict, # name, base_model, license (a string, or id and validated_by), datasets, tags, scope_line, input_shape, rows, latency, provenance, optional recipe, ladder and gate, and reference: name, k, n, bytes, params, macs, peak_activation_bytes\n)-&gt;str:\nRender the model card: front matter, scope, the absolute top-1, the three criteria against the reference, latency and provenance\n\n\n\n\nsource\n\n\ndef check_card(\n    text:str, # the card to read back\n)-&gt;list[str]:\nEvery forbidden phrase and every speedup claim without both a device and a runtime on its line; empty when the card is clean",
+    "crumbs": [
+      "API",
+      "Card"
+    ]
+  },
+  {
+    "objectID": "card.html#overview",
+    "href": "card.html#overview",
+    "title": "Card",
+    "section": "",
+    "text": "The reference is named on the card, so meta['reference'] carries a name, the k/n it was measured on, and the same criteria as a row (bytes, params, macs, peak_activation_bytes); without the first three render_card raises rather than compare to something anonymous.\nA row carries the k and n its top-1 was measured on and, when the producer measured one, the wilson interval around it, as the pair of fractions the harness returns. Anything else a row carries — a delta against the reference, its bounds, a target the variant aimed for — is ignored: the card reports the top-1 the artifact reaches, not a gap on it, and it names no objective. meta['ladder'] lists the sibling variants of the same source model so a reader can pick the point that suits them; the top-1 it shows is the worst published form of each repository, which is what the header says, and a variant without a count reads n/a. A row may also carry notes, each sentence rendered as its own paragraph under the row’s table.\nThe front matter carries a license: key only once a person has validated it: with license={'id': ..., 'validated_by': ''} the key is left out and the provenance block says the license is not yet validated, so the Hub never shows a license nobody checked. base_model: follows the same rule for a different reason — the Hub only accepts one of its own model ids there, so a source named by its factory (torchvision.models.resnet18 (IMAGENET1K_V1)) is written as Source model in the provenance block instead, where it says as much and breaks nothing.\nThe card carries four criteria and nothing else: top-1, size (on disk and in weights), memory (peak live activations for one image) and MACs. The top-1 is absolute — the accuracy this artifact reaches, with its 95 % interval in brackets and the number of images it was measured on, above the table and never against a reference. The other three are shown three times — the reference, this artifact, and the gap between them — so a number is never read alone. Sizes are megabytes, counts are millions. The gap is a signed percentage, never an N× ratio: a model that is 74 % smaller is not a model that runs four times faster.\nrecipe is optional — what produced the weights belongs on the card only when it helps the reader — and so is gate: pass the rows run_gate returned and the card carries one line, Publication checks: 10/10 structural checks passed., without their evidence, which belongs in the run log. The line names what it counts: the conditions are structural — no accuracy verdict hides behind the count.\nrender_card writes the card from measured values only: every number in it comes from meta, there is no default that could be mistaken for a measurement. A reference value the producer did not measure renders n/a, and a latency that was not measured is written not measured, never 0.\ncheck_card reads a card back and returns what a reader should not have to trust: the phrases in FORBIDDEN, and any speedup claim on a line that does not name both a device and a runtime — 2.3x faster says nothing, and so does 2.3x on CPU; 2.3x on CPU with onnxruntime says where it was measured.\n\n\nsource\n\n\ndef render_card(\n    meta:dict, # name, base_model, license (a string, or id and validated_by), datasets, tags, scope_line, input_shape, rows, latency, provenance, optional recipe, ladder and gate, and reference: name, k, n, bytes, params, macs, peak_activation_bytes\n)-&gt;str:\nRender the model card: front matter, scope, the absolute top-1, the three criteria against the reference, latency and provenance\n\n\n\n\nsource\n\n\ndef check_card(\n    text:str, # the card to read back\n)-&gt;list[str]:\nEvery forbidden phrase and every speedup claim without both a device and a runtime on its line; empty when the card is clean",
+    "crumbs": [
+      "API",
+      "Card"
+    ]
+  },
+  {
+    "objectID": "card.html#usage",
+    "href": "card.html#usage",
+    "title": "Card",
+    "section": "Usage",
+    "text": "Usage\nfrom fastermodels import render_card, check_card\n\nmeta = {\n    'name': 'resnet18-pruned', 'base_model': 'torchvision/resnet18', 'license': 'bsd-3-clause',\n    'datasets': ['frgfm/imagenette'], 'tags': ['fasterai', 'pruning'],\n    'scope_line': 'Imagenette, n=3925; pipeline evidence, not a published claim.',\n    'input_shape': '3x160x160',\n    'reference': {'name': 'resnet18 fine-tuned on Imagenette', 'k': 3700, 'n': 3925,\n                  'bytes': 44_726_568, 'params': 11_181_642, 'macs': 1_824_000_000,\n                  'peak_activation_bytes': 3_211_264},\n    'rows': [{'artifact': 'pruned FP32', 'file': 'model.safetensors', 'params': 8_900_000, 'bytes': 35_600_000,\n              'macs': 1_368_000_000, 'peak_activation_bytes': 2_408_448,\n              'k': 3680, 'n': 3925, 'wilson': (0.9296, 0.9447)}],\n    'latency': None,\n    'provenance': {'fasterai': '0.4.0', 'fastermodels': '0.1.0', 'torch': '2.9.1', 'measured_on': '2026-09-11'},\n}\n\ncard = render_card(meta)\ncheck_card(card)   # [] — nothing a reader has to take on trust\nTop-1: 93.8 % [93.0, 94.5] on 3925 images\n\n| criterion | reference | this artifact | gap |\n|---|---|---|---|\n| size | 44.7 MB, 11.2 M params | 35.6 MB, 8.9 M params | -20.4 % |\n| memory | 3.2 MB | 2.4 MB | -25.0 % |\n| MACs | 1.82 G | 1.37 G | -25.0 % |\nEvery value in rows and in reference is measured by the producer: the top-1 counts and the interval around them come from the harness, params, macs and peak_activation_bytes from the functions of the same name, and bytes is the size of the file on disk. Keys the card does not show are ignored. The card is written to README.md in the artifact directory, which is also what the Hub shows.",
+    "crumbs": [
+      "API",
+      "Card"
+    ]
+  },
+  {
+    "objectID": "card.html#see-also",
+    "href": "card.html#see-also",
+    "title": "Card",
+    "section": "See Also",
+    "text": "See Also\n\nEval - where k, n, the delta and the agreement come from\nGate - condition 7 refuses to publish a card check_card flags\nModel - the artifact the card describes\n\nTests live in nbs/tests/test_card.ipynb.",
+    "crumbs": [
+      "API",
+      "Card"
+    ]
+  },
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "fastermodels",
+    "section": "",
+    "text": "A model optimized by fasterai no longer has the shapes its factory builds — a pruned ResNet has fewer channels than torchvision.models.resnet18 gives you, and a checkpoint alone will not load. fastermodels publishes the missing half: the factory, the rebuild spec of the layers that changed, and the weights, in one artifact that reloads anywhere with FasterModel.from_pretrained.\nIt also carries what a reader needs in order to trust the artifact:",
+    "crumbs": [
+      "fastermodels"
+    ]
+  },
+  {
+    "objectID": "index.html#install",
+    "href": "index.html#install",
+    "title": "fastermodels",
+    "section": "Install",
+    "text": "Install\npip install fastermodels",
+    "crumbs": [
+      "fastermodels"
+    ]
+  },
+  {
+    "objectID": "index.html#how-to-use",
+    "href": "index.html#how-to-use",
+    "title": "fastermodels",
+    "section": "How to use",
+    "text": "How to use\nPublish a model you just optimized:\nfrom fastermodels import FasterModel\n\nfm = FasterModel.wrap(pruned, 'torchvision.models.resnet18', {'num_classes': 10, 'weights': None},\n                      recipe={'prune': 'ratio 0.3, local, round_to 8'})\nfm.save_pretrained('artifact')            # config.json + model.safetensors\nLoad it back and measure it:\nfrom fastermodels import load, correct_vector, wilson, paired_delta, params, macs, peak_activation_bytes\n\nfm = load('artifact')                          # safetensors, else TorchScript, else the ONNX path\nopt = correct_vector(fm, valid_dl)\nk, n = int(opt.sum()), opt.size\nwilson(k, n)                                   # the interval that belongs next to k/n\npaired_delta(correct_vector(source, valid_dl), opt)\nparams(fm), macs(fm, sample), peak_activation_bytes(fm, sample)   # size, compute, memory at batch 1\nWrite its card and run the gate before publishing:\nfrom fastermodels import render_card, check_card, run_gate, gate_passed\n\nopen('artifact/README.md', 'w').write(render_card(meta))\ncheck_card(open('artifact/README.md').read())          # [] when the card is clean\ngate_passed(run_gate('artifact', manifest))",
+    "crumbs": [
+      "fastermodels"
+    ]
+  },
+  {
+    "objectID": "index.html#documentation",
+    "href": "index.html#documentation",
+    "title": "fastermodels",
+    "section": "Documentation",
+    "text": "Documentation\nThe API pages are at FasterAI-Labs.github.io/fastermodels: Model, Eval, Card, Gate.",
+    "crumbs": [
+      "fastermodels"
+    ]
+  }
+]

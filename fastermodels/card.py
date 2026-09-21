@@ -84,17 +84,19 @@ def render_card(
             said = (f"met (lower bound {r['lo']:+.1f})" if r['lo'] > r['target']
                     else f"not demonstrated (lower bound {r['lo']:+.1f}; {why})")
             out += ['', f"Accuracy target: {r['target']:+.1f} pt — {said}"]
+        for note in r.get('notes') or []: out += ['', note]
         out += ['']
     if meta.get('rows'):
         out += ['Gaps are measured on the same images as the reference; brackets give the 95 % interval.', '']
     if meta.get('ladder'):
         out += ['## Variants', '', 'Other points on the same ladder, from the same source model:', '',
-                '| variant | repo | top-1 gap (pt) | size | memory | MACs |', '|---|---|---|---|---|---|']
+                '| variant | repo | top-1 gap (pt), worst published form | size | memory | MACs |',
+                '|---|---|---|---|---|---|']
         out += [f"| {v['name']} | `{v['repo']}` | {v['delta']:+.1f} | {_mb(v.get('bytes'))} "
                 f"| {_mb(v.get('peak_activation_bytes'))} | {_millions(v.get('macs'))} |" for v in meta['ladder']]
         out += ['']
     out += ['## Latency', '']
-    if not latency: out += ['non mesurée']
+    if not latency: out += ['not measured']
     else:
         out += ['| device | runtime | precision | batch | median (ms) | runs |', '|---|---|---|---|---|---|']
         out += [f"| {r['device']} | {r['runtime']} | {r['precision']} | {r['batch']} | {r['median_ms']} | {r['n_runs']} |"
@@ -104,8 +106,9 @@ def render_card(
     if not validated: out += [f"- License: {lic_id} (not yet validated by a person)"]
     if meta.get('gate'):
         failed = [g['name'] for g in meta['gate'] if not g['passed']]
-        out += ['', f"Publication checks: {len(meta['gate']) - len(failed)}/{len(meta['gate'])} passed"
-                    + (f" — not passed: {', '.join(failed)}." if failed else '.')]
+        out += ['', f"Publication checks: {len(meta['gate']) - len(failed)}/{len(meta['gate'])} structural "
+                    "checks passed (they do not include the accuracy target, whose verdict is in each table above)."
+                    + (f" Not passed: {', '.join(failed)}." if failed else '')]
     return '\n'.join(out) + '\n'
 
 

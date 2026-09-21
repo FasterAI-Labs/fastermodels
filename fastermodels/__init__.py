@@ -1,4 +1,4 @@
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 from fastermodels.model import FasterModel, spec_from, state_hash, resolve, load
 from fastermodels.eval import (predictions, correct_vector, wilson, paired_delta, PairedDelta, agreement,

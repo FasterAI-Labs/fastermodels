@@ -34,5 +34,6 @@ website:
         - 01_eval.ipynb
         - 02_card.ipynb
         - 03_gate.ipynb
+        - 04_measurement.ipynb
 
 metadata-files: [nbdev.yml]

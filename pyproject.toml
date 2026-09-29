@@ -18,6 +18,7 @@ dependencies = ['torch', 'huggingface_hub>=0.25', 'safetensors', 'numpy']
 test = ['torchvision', 'torch-pruning', 'onnx', 'fastcore']
 dev = ['nbdev', 'torchvision', 'torch-pruning', 'onnx', 'fastcore', 'pandas', 'pyarrow']
 parquet = ['pandas', 'pyarrow']
+onnx = ['onnx']
 
 [project.urls]
 Repository = "https://github.com/FasterAI-Labs/fastermodels"

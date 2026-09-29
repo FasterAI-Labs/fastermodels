@@ -3,6 +3,7 @@
 # %% ../nbs/04_measurement.ipynb #imports
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import numbers
@@ -11,47 +12,54 @@ from datetime import datetime
 from pathlib import Path
 
 # %% auto #0
-__all__ = ['SCHEMA_VERSION', 'FIELDS', 'validate', 'status', 'key', 'throughput', 'read_rows', 'write_row', 'to_parquet']
+__all__ = ['SCHEMA_VERSION', 'FIELDS', 'validate', 'status', 'key', 'throughput', 'join', 'graph_hash', 'read_rows', 'write_row',
+           'to_parquet']
 
 # %% ../nbs/04_measurement.ipynb #schema
 SCHEMA_VERSION = 1
 _UTC = r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|\+00:00)'
+_HEX = r'[0-9a-f]{64}'
 _PCT = dict(ge=0, le=100)
+_PRECISION = dict(type=str, required=True, choices=('fp32', 'fp16', 'int8', 'mixed'))
 
 # name -> type, required, and the declarative rules its value obeys; a field that is not required may be absent or None
-FIELDS = {
-    # identity and provenance
+_SHARED = {
     'schema_version': dict(type=int, required=True, choices=(SCHEMA_VERSION,)),
+    'kind': dict(type=str, required=True, choices=('latency', 'quality')),
     'run_id': dict(type=str, required=True),
     'measured_at': dict(type=str, required=True, pattern=_UTC, date=True),
     'series': dict(type=str, required=False),
     'harness_commit': dict(type=str, required=True),
     'fasterai_version': dict(type=str, required=False),
     'report_url': dict(type=str, required=False),
-    'hf_repo': dict(type=str, required=False),
-    # model
-    'model_id': dict(type=str, required=True),
-    'model_revision': dict(type=str, required=True),
-    'task': dict(type=str, required=True, choices=('classification', 'detection')),
+}
+
+_LATENCY = {
+    # graph
     'architecture': dict(type=str, required=True),
-    'base_weights': dict(type=str, required=True),
-    'weights_license': dict(type=str, required=True),
-    'variant': dict(type=str, required=True),
-    'recipe': dict(type=dict, required=True, json=True),
+    'graph_hash': dict(type=str, required=True, pattern=_HEX),   # `graph_hash`: the ONNX graph without its weight values
     'input_resolution': dict(type=int, required=True, gt=0),
     'macs': dict(type=int, required=True, gt=0),
     'params': dict(type=int, required=True, gt=0),
-    'model_hash': dict(type=str, required=False),   # whatever fingerprint the exporter records, so not pinned
-    'engine_hash': dict(type=str, required=True, pattern=r'[0-9a-f]{64}'),   # sha256 of the engine file that ran
+    'variant': dict(type=str, required=True),
+    'recipe': dict(type=dict, required=True, json=True),
+    'weights': dict(type=str, required=True, choices=('trained', 'random')),
+    'model_id': dict(type=str, required=False),
+    'model_revision': dict(type=str, required=False),
+    # artifact
+    'precision': _PRECISION,
+    'int8_mode': dict(type=str, required=False, choices=('implicit', 'explicit')),
+    'engine_hash': dict(type=str, required=True, pattern=_HEX),   # sha256 of the engine file that ran
     'size_mb': dict(type=float, required=True, gt=0),
+    'engine_layers': dict(type=int, required=False, gt=0),
+    'reformat_layers': dict(type=int, required=False, ge=0),
+    'layer_precisions': dict(type=dict, required=False, counts=True),
     # device and runtime
     'device': dict(type=str, required=True),
     'device_host': dict(type=str, required=True, choices=('own', 'rented', 'partner')),
     'runtime': dict(type=str, required=True, choices=('tensorrt', 'openvino', 'onnxruntime', 'hailo', 'axelera')),
     'runtime_version': dict(type=str, required=True),
     'platform_version': dict(type=str, required=False),
-    'precision': dict(type=str, required=True, choices=('fp32', 'fp16', 'int8', 'mixed')),
-    'int8_mode': dict(type=str, required=False, choices=('implicit', 'explicit')),
     'power_mode': dict(type=str, required=False),
     'clocks_locked': dict(type=bool, required=False),
     'batch_size': dict(type=int, required=True, ge=1),
@@ -71,7 +79,16 @@ FIELDS = {
     'latency_scope': dict(type=str, required=True),
     'host_latency_ms': dict(type=float, required=False, gt=0),
     'latency_source': dict(type=str, required=True, choices=('measured', 'estimated')),
-    # quality
+}
+
+_QUALITY = {
+    'model_id': dict(type=str, required=True),
+    'model_revision': dict(type=str, required=True),
+    'model_hash': dict(type=str, required=False),   # whatever fingerprint the exporter records, so not pinned
+    'weights_license': dict(type=str, required=True),
+    'engine_hash': dict(type=str, required=False, pattern=_HEX),   # the engine the accuracy was measured through
+    'precision': _PRECISION,
+    'device': dict(type=str, required=False),
     'metric': dict(type=str, required=True),
     'eval_set': dict(type=str, required=True),
     'eval_set_hash': dict(type=str, required=True),
@@ -86,6 +103,9 @@ FIELDS = {
     'parity_floor': dict(type=float, required=True, **_PCT),
     'baseline_run_id': dict(type=str, required=False),
 }
+
+FIELDS = {'latency': {**_SHARED, **_LATENCY}, 'quality': {**_SHARED, **_QUALITY}}
+
 
 def _item(o):
     "A numpy scalar as the Python number JSON knows"
@@ -107,18 +127,6 @@ def _is_date(v):
     except ValueError: return False
 
 
-_RULES = {
-    'choices': (lambda v, c: v in c, 'not one of {}'),
-    'gt': (lambda v, b: v > b, 'not > {}'),
-    'ge': (lambda v, b: v >= b, 'not >= {}'),
-    'le': (lambda v, b: v <= b, 'not <= {}'),
-    'pattern': (lambda v, p: re.fullmatch(p, v) is not None, 'does not match {}'),
-    'date': (lambda v, _: _is_date(v), 'is not a date'),
-    'json': (lambda v, _: _is_json(v), 'is not JSON'),
-}
-_ORDERED = (('ci_low', 'accuracy', 'ci_high'), ('latency_ms_p50', 'latency_ms_p90', 'latency_ms_p99'))
-
-
 def _typed(v, t):
     "`v` is a `t`; a bool is not a number, a numpy integer is an int, an int is a float, a float is finite"
     if isinstance(v, bool): return t is bool
@@ -127,9 +135,23 @@ def _typed(v, t):
     return isinstance(v, t)
 
 
-def _field_problems(name, v):
+_RULES = {
+    'choices': (lambda v, c: v in c, 'not one of {}'),
+    'gt': (lambda v, b: v > b, 'not > {}'),
+    'ge': (lambda v, b: v >= b, 'not >= {}'),
+    'le': (lambda v, b: v <= b, 'not <= {}'),
+    'pattern': (lambda v, p: re.fullmatch(p, v) is not None, 'does not match {}'),
+    'date': (lambda v, _: _is_date(v), 'is not a date'),
+    'json': (lambda v, _: _is_json(v), 'is not JSON'),
+    'counts': (lambda v, _: all(isinstance(k, str) and _typed(n, int) and n >= 0 for k, n in v.items()),
+               'is not a {{name: count}} dict'),
+}
+_ORDERED = {'latency': (('latency_ms_p50', 'latency_ms_p90', 'latency_ms_p99'), ('reformat_layers', 'engine_layers')),
+            'quality': (('ci_low', 'accuracy', 'ci_high'),)}
+
+
+def _field_problems(name, spec, v):
     "The problems of one field value, against its spec"
-    spec = FIELDS[name]
     if v is None: return [f'{name}: missing'] if spec['required'] else []
     if not _typed(v, spec['type']): return [f'{name}: expected {spec["type"].__name__}, got {v!r}']
     return [f'{name}: {v!r} {msg.format(spec[r])}' for r, (ok, msg) in _RULES.items() if r in spec and not ok(v, spec[r])]
@@ -137,11 +159,16 @@ def _field_problems(name, v):
 
 def _cross_problems(row):
     "Problems between fields; each field involved is already well typed"
-    p, mode = row['precision'], row.get('int8_mode')
-    out = []
-    if p == 'int8' and mode is None: out.append('int8_mode: missing, required when precision is int8')
-    if p != 'int8' and mode is not None: out.append(f'int8_mode: {mode!r} given for precision {p!r}')
-    for fields in _ORDERED:
+    out, kind = [], row['kind']
+    if kind == 'latency':
+        p, mode = row['precision'], row.get('int8_mode')
+        if p == 'int8' and mode is None: out.append('int8_mode: missing, required when precision is int8')
+        if p != 'int8' and mode is not None: out.append(f'int8_mode: {mode!r} given for precision {p!r}')
+        if row['weights'] == 'random' and row.get('model_id') is not None:
+            out.append(f"model_id: {row['model_id']!r} given for random weights")
+    elif row['measured_through'] == 'deployed_engine' and row.get('engine_hash') is None:
+        out.append('engine_hash: missing, required when measured through the deployed engine')
+    for fields in _ORDERED[kind]:
         vals = [(f, row[f]) for f in fields if row.get(f) is not None]
         if [v for _, v in vals] != sorted(v for _, v in vals):
             out.append(f"{', '.join(fields)}: not in order, " + ', '.join(f'{f}={v}' for f, v in vals))
@@ -149,54 +176,115 @@ def _cross_problems(row):
 
 
 def validate(
-    row: dict,  # one measurement row
+    row: dict,  # one measurement row, of either kind
 ) -> list[str]:
     "Every structural problem of `row`, each prefixed by its field name; an empty list means well formed"
     if not isinstance(row, dict): return [f'row: expected a dict, got {type(row).__name__}']
-    out = [f'{k}: unknown field' for k in row if k not in FIELDS]
-    for name in FIELDS: out += _field_problems(name, row.get(name))
+    kind = row.get('kind')
+    if kind is None: return ['kind: missing']
+    if not isinstance(kind, str) or kind not in FIELDS: return [f'kind: {kind!r} not one of {tuple(FIELDS)}']
+    fields = FIELDS[kind]
+    out = [f'{k}: unknown field for a {kind} row' for k in row if k not in fields]
+    for name, spec in fields.items(): out += _field_problems(name, spec, row.get(name))
     return out or _cross_problems(row)
 
 # %% ../nbs/04_measurement.ipynb #status
-# field, when its value makes the measurement invalid, and why; a field that is None is not recorded
-_VALIDITY = (
-    ('measured_through', lambda v, r, m: v != 'deployed_engine', 'accuracy not measured through the deployed engine'),
-    ('latency_source', lambda v, r, m: v != 'measured', 'latency not measured on the device'),
-    ('argmax_parity', lambda v, r, m: v < r['parity_floor'], '{v} below parity_floor {r[parity_floor]}'),
-    ('throttled', lambda v, r, m: v, 'the device throttled during the session'),
-    ('latency_spread_pct', lambda v, r, m: v > m, '{v} above {m}'),
-)
+# per kind: field, when its value makes the measurement invalid, and why; a field that is None is not recorded
+_VALIDITY = {
+    'latency': (
+        ('latency_source', lambda v, r, m: v != 'measured', 'latency not measured on the device'),
+        ('throttled', lambda v, r, m: v, 'the device throttled during the session'),
+        ('latency_spread_pct', lambda v, r, m: v > m, '{v} above {m}'),
+    ),
+    'quality': (
+        ('measured_through', lambda v, r, m: v != 'deployed_engine', 'accuracy not measured through the deployed engine'),
+        ('argmax_parity', lambda v, r, m: v < r['parity_floor'], '{v} below parity_floor {r[parity_floor]}'),
+    ),
+}
 
 
 def status(
-    row: dict,                    # one measurement row
+    row: dict,                    # one measurement row, of either kind
     max_spread_pct: float = 5.0,  # largest (max-min)/median latency spread over repeats, in percent
 ) -> tuple[str, list[str]]:
     "('VALID', []) if `row` is a usable measurement, else ('INVALID', reasons); not a verdict against any budget"
     reasons = validate(row)
     if reasons: return 'INVALID', reasons
-    for f, bad, why in _VALIDITY:
+    for f, bad, why in _VALIDITY[row['kind']]:
         v = row.get(f)
         if v is None: reasons.append(f'{f}: not recorded')
         elif bad(v, row, max_spread_pct): reasons.append(f'{f}: ' + why.format(v=v, r=row, m=max_spread_pct))
     return ('INVALID', reasons) if reasons else ('VALID', [])
 
 # %% ../nbs/04_measurement.ipynb #key
+_KEYS = {
+    'latency': ('graph_hash', 'weights', 'precision', 'int8_mode', 'batch_size', 'device', 'runtime',
+                'runtime_version', 'platform_version', 'measured_at'),
+    'quality': ('model_id', 'model_revision', 'engine_hash', 'eval_set_hash', 'metric', 'measured_at'),
+}
+
+
 def key(
-    row: dict,  # one measurement row
+    row: dict,  # one well-formed measurement row
 ) -> tuple:
-    "The identity a row is unique on; a software update on the device gives a new key"
-    return (row['model_id'], row['model_revision'], row['variant'], _canonical(row['recipe']),
-            row['input_resolution'], row['device'], row['runtime'], row['runtime_version'],
-            row.get('platform_version'), row['precision'], row.get('int8_mode'), row['batch_size'],
-            row['measured_at'])
+    "The identity a row is unique on, its kind first; a software update on the device gives a new latency key"
+    return (row['kind'],) + tuple(row.get(f) for f in _KEYS[row['kind']])
 
 
 def throughput(
-    row: dict,  # one measurement row
+    row: dict,  # one latency row
 ) -> float:
     "Images per second at the timed batch, derived from the median latency and never stored"
+    if row.get('kind') != 'latency': raise ValueError(f"throughput needs a latency row, got kind {row.get('kind')!r}")
     return row['batch_size'] * 1000 / row['latency_ms_p50']
+
+# %% ../nbs/04_measurement.ipynb #join
+_OWN = tuple(f for f in _SHARED if f not in ('schema_version', 'kind'))   # kept per side, prefixed
+_BOTH = tuple(f for f in _LATENCY if f in _QUALITY)                        # one column, both sides must agree
+
+
+def _pair(lat, qual):
+    "One joined dict from a latency row and a quality row of the same engine"
+    out = {'schema_version': lat['schema_version']}
+    for side, r in (('latency', lat), ('quality', qual)):
+        out |= {f'{side}_{f}': r.get(f) for f in _OWN}
+        out |= {f: r.get(f) for f in FIELDS[side] if f not in _SHARED and f not in _BOTH}
+    for f in _BOTH:
+        a, b = lat.get(f), qual.get(f)
+        if None not in (a, b) and a != b:
+            raise ValueError(f"{f}: latency row {lat['run_id']} says {a!r}, quality row {qual['run_id']} {b!r}, same engine")
+        out[f] = b if a is None else a
+    return out
+
+
+def join(
+    latency_rows: list[dict],  # latency rows; rows of the other kind and invalid rows are skipped
+    quality_rows: list[dict],  # quality rows; rows of the other kind and invalid rows are skipped
+) -> list[dict]:
+    "One dict per pair of VALID latency and quality rows sharing an `engine_hash`"
+    by_engine = {}
+    for q in quality_rows:
+        if q.get('kind') == 'quality' and status(q)[0] == 'VALID': by_engine.setdefault(q['engine_hash'], []).append(q)
+    return [_pair(l, q) for l in latency_rows if l.get('kind') == 'latency' and status(l)[0] == 'VALID'
+            for q in by_engine.get(l['engine_hash'], [])]
+
+# %% ../nbs/04_measurement.ipynb #graph
+def graph_hash(
+    onnx_path: str | Path,  # an ONNX file
+) -> str:
+    "sha256 of the ONNX graph with every initializer's values removed and its name, shape and type kept"
+    try: import onnx
+    except ImportError: raise ImportError("graph_hash needs onnx: pip install 'fastermodels[onnx]'") from None
+    m = onnx.load(str(onnx_path), load_external_data=False)
+    # ponytail: top-level initializers only; Constant nodes and subgraph initializers keep their values
+    for t in m.graph.initializer:
+        name, dtype, dims = t.name, t.data_type, list(t.dims)
+        t.Clear()
+        t.name, t.data_type = name, dtype
+        t.dims.extend(dims)
+    h = hashlib.sha256(m.graph.SerializeToString(deterministic=True))
+    for o in sorted((o.domain, o.version) for o in m.opset_import): h.update(f'{o[0]}:{o[1]};'.encode())
+    return h.hexdigest()
 
 # %% ../nbs/04_measurement.ipynb #io
 def _parse(text, path):
@@ -212,7 +300,7 @@ def _parse(text, path):
 
 
 def read_rows(
-    path: str | Path,  # a JSON Lines file of measurement rows
+    path: str | Path,  # a JSON Lines file of measurement rows, of either kind
 ) -> list[dict]:
     "The rows of `path`, as stored; `status` judges them"
     return _parse(Path(path).read_text(), path)
@@ -227,22 +315,27 @@ def write_row(
     if problems: raise ValueError('row refused: ' + '; '.join(problems))
     p, k = Path(path), key(row)
     text = p.read_text() if p.exists() else ''
-    if k in {key(r) for r in _parse(text, path)}: raise ValueError(f'row refused: key {k} already in {path}')
+    if k in {key(r) for r in _parse(text, path) if r.get('kind') == row['kind']}:
+        raise ValueError(f'row refused: key {k} already in {path}')
     # ponytail: no file lock, one writer at a time
     with p.open('a') as f: f.write(('\n' if text and not text.endswith('\n') else '') + _json(row) + '\n')
 
 # %% ../nbs/04_measurement.ipynb #parquet
 def to_parquet(
-    rows: list[dict],  # well-formed measurement rows, e.g. from `read_rows`
+    rows: list[dict],  # well-formed measurement rows of one kind, e.g. from `read_rows`
     path: str | Path,  # the Parquet file to write
 ):
-    "Write `rows` as one Parquet table, one column per field in `FIELDS` order, dict fields as canonical JSON"
+    "Write `rows` as one Parquet table, one column per field of their kind, dict fields as canonical JSON"
     try:
         import pandas as pd
         import pyarrow  # noqa: F401
     except ImportError: raise ImportError("to_parquet needs pandas and pyarrow: pip install 'fastermodels[parquet]'") from None
+    kinds = sorted({str(r.get('kind')) for r in rows})
+    if len(kinds) != 1: raise ValueError(f'to_parquet writes one kind per file, got {kinds or "no rows"}')
     for i, r in enumerate(rows):
         problems = validate(r)
         if problems: raise ValueError(f'row {i} refused: ' + '; '.join(problems))
-    table = [{k: _canonical(r[k]) if FIELDS[k]['type'] is dict else r.get(k) for k in FIELDS} for r in rows]
-    pd.DataFrame(table, columns=list(FIELDS)).to_parquet(path, engine='pyarrow', index=False)
+    fields = FIELDS[kinds[0]]
+    table = [{k: _canonical(r[k]) if fields[k]['type'] is dict and r.get(k) is not None else r.get(k) for k in fields}
+             for r in rows]
+    pd.DataFrame(table, columns=list(fields)).to_parquet(path, engine='pyarrow', index=False)

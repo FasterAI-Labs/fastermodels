@@ -321,21 +321,26 @@ def write_row(
     with p.open('a') as f: f.write(('\n' if text and not text.endswith('\n') else '') + _json(row) + '\n')
 
 # %% ../nbs/04_measurement.ipynb #parquet
+_ARROW = {str: 'string', int: 'int64', float: 'float64', bool: 'bool_', dict: 'string'}   # a dict is stored as canonical JSON
+
+
 def to_parquet(
     rows: list[dict],  # well-formed measurement rows of one kind, e.g. from `read_rows`
     path: str | Path,  # the Parquet file to write
 ):
-    "Write `rows` as one Parquet table, one column per field of their kind, dict fields as canonical JSON"
+    "Write `rows` as one Parquet table with an explicit schema: one typed column per field of their kind"
     try:
-        import pandas as pd
-        import pyarrow  # noqa: F401
-    except ImportError: raise ImportError("to_parquet needs pandas and pyarrow: pip install 'fastermodels[parquet]'") from None
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError: raise ImportError("to_parquet needs pyarrow: pip install 'fastermodels[parquet]'") from None
     kinds = sorted({str(r.get('kind')) for r in rows})
     if len(kinds) != 1: raise ValueError(f'to_parquet writes one kind per file, got {kinds or "no rows"}')
     for i, r in enumerate(rows):
         problems = validate(r)
         if problems: raise ValueError(f'row {i} refused: ' + '; '.join(problems))
     fields = FIELDS[kinds[0]]
+    schema = pa.schema([pa.field(k, getattr(pa, _ARROW[s['type']])(), nullable=not s['required']) for k, s in fields.items()])
+    plain = [json.loads(_json(r)) for r in rows]   # numpy scalars become Python numbers
     table = [{k: _canonical(r[k]) if fields[k]['type'] is dict and r.get(k) is not None else r.get(k) for k in fields}
-             for r in rows]
-    pd.DataFrame(table, columns=list(fields)).to_parquet(path, engine='pyarrow', index=False)
+             for r in plain]
+    pq.write_table(pa.Table.from_pylist(table, schema=schema), str(path))

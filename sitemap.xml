@@ -1,0 +1,31 @@
+<?xml version='1.0' encoding='utf-8'?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://FasterAI-Labs.github.io/fastermodels/model.html</loc>
+    <lastmod>2026-09-29T10:00:15.400Z</lastmod>
+  </url>
+  <url>
+    <loc>https://FasterAI-Labs.github.io/fastermodels/measurement.html</loc>
+    <lastmod>2026-09-29T10:00:15.474Z</lastmod>
+  </url>
+<url>
+    <loc>https://FasterAI-Labs.github.io/fastermodels/eval.html</loc>
+    <lastmod>2026-09-29T10:00:15.476Z</lastmod>
+  </url>
+  <url>
+    <loc>https://FasterAI-Labs.github.io/fastermodels/index.html</loc>
+    <lastmod>2026-09-29T10:00:15.445Z</lastmod>
+  </url>
+<url>
+    <loc>https://FasterAI-Labs.github.io/fastermodels/card.html</loc>
+    <lastmod>2026-09-29T10:00:15.314Z</lastmod>
+  </url>
+  <url>
+    <loc>https://FasterAI-Labs.github.io/fastermodels/tutorials/load_and_check.html</loc>
+    <lastmod>2026-09-29T10:00:15.554Z</lastmod>
+  </url>
+<url>
+    <loc>https://FasterAI-Labs.github.io/fastermodels/gate.html</loc>
+    <lastmod>2026-09-29T10:00:15.404Z</lastmod>
+  </url>
+</urlset>

@@ -5,3 +5,4 @@ from fastermodels.eval import (predictions, correct_vector, wilson, paired_delta
                                params, macs, peak_activation_bytes)
 from fastermodels.card import render_card, check_card, FORBIDDEN
 from fastermodels.gate import run_gate, gate_passed, GateRow
+from fastermodels import measurement as measurement

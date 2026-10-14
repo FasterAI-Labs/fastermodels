@@ -12,11 +12,12 @@ from datetime import datetime
 from pathlib import Path
 
 # %% auto #0
-__all__ = ['SCHEMA_VERSION', 'FIELDS', 'validate', 'status', 'key', 'throughput', 'join', 'graph_hash', 'read_rows', 'write_row',
-           'to_parquet']
+__all__ = ['SCHEMA_VERSION', 'SCHEMA_VERSIONS', 'RECIPE_KEYS', 'FIELDS_BY_VERSION', 'FIELDS', 'validate', 'upgrade', 'status',
+           'key', 'throughput', 'join', 'graph_hash', 'read_rows', 'write_row', 'to_parquet']
 
 # %% ../nbs/04_measurement.ipynb #schema
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2              # what new rows are written at
+SCHEMA_VERSIONS = (1, 2)        # what `validate` reads, each against its own fields
 _UTC = r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|\+00:00)'
 _HEX = r'[0-9a-f]{64}'
 _PCT = dict(ge=0, le=100)
@@ -24,7 +25,7 @@ _PRECISION = dict(type=str, required=True, choices=('fp32', 'fp16', 'int8', 'mix
 
 # name -> type, required, and the declarative rules its value obeys; a field that is not required may be absent or None
 _SHARED = {
-    'schema_version': dict(type=int, required=True, choices=(SCHEMA_VERSION,)),
+    'schema_version': dict(type=int, required=True, choices=SCHEMA_VERSIONS),
     'kind': dict(type=str, required=True, choices=('latency', 'quality')),
     'run_id': dict(type=str, required=True),
     'measured_at': dict(type=str, required=True, pattern=_UTC, date=True),
@@ -104,7 +105,32 @@ _QUALITY = {
     'baseline_run_id': dict(type=str, required=False),
 }
 
-FIELDS = {'latency': {**_SHARED, **_LATENCY}, 'quality': {**_SHARED, **_QUALITY}}
+# ---- version 2 (2026-10-14): the task and the family, detection parity, figures a vendor published, power,
+#      and the recipe keys a variant is described by. Version 1 rows keep their own fields, unchanged. ----
+_TASK = dict(type=str, required=True, choices=('classification', 'detection'))
+_FAMILY = dict(type=str, required=False)       # e.g. 'ultralytics-yolo', 'yolox', 'resnet'
+_SOURCE = ('measured', 'estimated', 'vendor_published')
+_LATENCY_V2 = {'task': _TASK, 'family': _FAMILY,
+               **{k: v for k, v in _LATENCY.items() if k != 'latency_source'},
+               'latency_source': dict(type=str, required=True, choices=_SOURCE),
+               'power_w': dict(type=float, required=False, gt=0)}
+_QUALITY_V2 = {'task': _TASK, 'family': _FAMILY,
+               **{k: v for k, v in _QUALITY.items() if k not in ('argmax_parity', 'parity_floor', 'ci_low', 'ci_high', 'ci_method')},
+               'accuracy_source': dict(type=str, required=True, choices=('measured', 'vendor_published')),
+               'ci_low': dict(type=float, required=False, **_PCT),      # required when measured (`_cross_problems`)
+               'ci_high': dict(type=float, required=False, **_PCT),
+               'ci_method': dict(type=str, required=False, choices=('wilson', 'bootstrap')),
+               'parity': dict(type=float, required=False, **_PCT),
+               'parity_metric': dict(type=str, required=False, choices=('argmax', 'box_iou90')),
+               'parity_floor': dict(type=float, required=False, **_PCT)}
+
+# the recipe keys a variant is described by; each is checked for its type when present, other keys are free
+RECIPE_KEYS = {'resolution': int, 'num_classes': int, 'roi_crop': list, 'pruned': bool, 'prune_method': str,
+               'prune_ratio': float, 'distilled': bool, 'teacher': str, 'qat': bool, 'quant': str, 'calib_n': int}
+
+FIELDS_BY_VERSION = {1: {'latency': {**_SHARED, **_LATENCY}, 'quality': {**_SHARED, **_QUALITY}},
+                     2: {'latency': {**_SHARED, **_LATENCY_V2}, 'quality': {**_SHARED, **_QUALITY_V2}}}
+FIELDS = FIELDS_BY_VERSION[SCHEMA_VERSION]
 
 
 def _item(o):
@@ -168,6 +194,17 @@ def _cross_problems(row):
             out.append(f"model_id: {row['model_id']!r} given for random weights")
     elif row['measured_through'] == 'deployed_engine' and row.get('engine_hash') is None:
         out.append('engine_hash: missing, required when measured through the deployed engine')
+    if row['schema_version'] >= 2:
+        if kind == 'latency':
+            for k, v in row['recipe'].items():
+                t = RECIPE_KEYS.get(k)
+                if t is not None and v is not None and not _typed(v, t):
+                    out.append(f'recipe.{k}: expected {t.__name__}, got {v!r}')
+        elif row['accuracy_source'] == 'measured':
+            for f in ('ci_low', 'ci_high', 'ci_method', 'parity_metric', 'parity_floor'):
+                if row.get(f) is None: out.append(f'{f}: missing, required when the accuracy was measured')
+        if kind == 'quality' and row.get('parity') is not None and row.get('parity_metric') is None:
+            out.append('parity_metric: missing, required to read parity')
     for fields in _ORDERED[kind]:
         vals = [(f, row[f]) for f in fields if row.get(f) is not None]
         if [v for _, v in vals] != sorted(v for _, v in vals):
@@ -178,15 +215,38 @@ def _cross_problems(row):
 def validate(
     row: dict,  # one measurement row, of either kind
 ) -> list[str]:
-    "Every structural problem of `row`, each prefixed by its field name; an empty list means well formed"
+    "Every structural problem of `row`, each prefixed by its field name; an empty list means well formed. A row is read against the fields of ITS `schema_version`"
     if not isinstance(row, dict): return [f'row: expected a dict, got {type(row).__name__}']
     kind = row.get('kind')
     if kind is None: return ['kind: missing']
     if not isinstance(kind, str) or kind not in FIELDS: return [f'kind: {kind!r} not one of {tuple(FIELDS)}']
-    fields = FIELDS[kind]
+    v = row.get('schema_version')
+    if v is not None and (isinstance(v, bool) or v not in FIELDS_BY_VERSION):   # an unknown version: nothing else can be read
+        return _field_problems('schema_version', _SHARED['schema_version'], v)
+    fields = FIELDS_BY_VERSION.get(v, FIELDS)[kind]                              # each version against its own fields
     out = [f'{k}: unknown field for a {kind} row' for k in row if k not in fields]
     for name, spec in fields.items(): out += _field_problems(name, spec, row.get(name))
     return out or _cross_problems(row)
+
+
+def upgrade(
+    row: dict,                   # a well-formed version-1 row
+    task: str,                   # what version 1 did not record: 'classification' or 'detection'
+    family: str | None = None,   # and, optionally, the model family
+) -> dict:
+    "The version-2 row a version-1 row is: `task` (and `family`) added; on a quality row `argmax_parity` becomes `parity` with `parity_metric='argmax'` and `accuracy_source='measured'`. The result is validated; a version-2 row comes back unchanged."
+    if row.get('schema_version') == 2: return dict(row)
+    problems = validate(row)
+    if problems: raise ValueError('row not upgraded: ' + '; '.join(problems))
+    out = {**row, 'schema_version': 2, 'task': task, 'family': family}
+    if row['kind'] == 'quality':
+        out['accuracy_source'] = 'measured'
+        par = out.pop('argmax_parity', None)
+        out['parity'], out['parity_metric'] = par, 'argmax'
+    problems = validate(out)
+    if problems: raise ValueError('upgraded row refused: ' + '; '.join(problems))
+    return out
+
 
 # %% ../nbs/04_measurement.ipynb #status
 # per kind: field, when its value makes the measurement invalid, and why; a field that is None is not recorded
@@ -201,6 +261,15 @@ _VALIDITY = {
         ('argmax_parity', lambda v, r, m: v < r['parity_floor'], '{v} below parity_floor {r[parity_floor]}'),
     ),
 }
+# version 2: a figure a vendor published is recorded, labelled, and never a measurement of ours
+_VALIDITY_V2 = {
+    'latency': _VALIDITY['latency'],
+    'quality': (
+        ('accuracy_source', lambda v, r, m: v != 'measured', 'accuracy not measured by us ({v})'),
+        _VALIDITY['quality'][0],
+        ('parity', lambda v, r, m: v < r['parity_floor'], '{v} below parity_floor {r[parity_floor]} ({r[parity_metric]})'),
+    ),
+}
 
 
 def status(
@@ -210,7 +279,7 @@ def status(
     "('VALID', []) if `row` is a usable measurement, else ('INVALID', reasons); not a verdict against any budget"
     reasons = validate(row)
     if reasons: return 'INVALID', reasons
-    for f, bad, why in _VALIDITY[row['kind']]:
+    for f, bad, why in (_VALIDITY_V2 if row['schema_version'] >= 2 else _VALIDITY)[row['kind']]:
         v = row.get(f)
         if v is None: reasons.append(f'{f}: not recorded')
         elif bad(v, row, max_spread_pct): reasons.append(f'{f}: ' + why.format(v=v, r=row, m=max_spread_pct))
@@ -240,16 +309,20 @@ def throughput(
 
 # %% ../nbs/04_measurement.ipynb #join
 _OWN = tuple(f for f in _SHARED if f not in ('schema_version', 'kind'))   # kept per side, prefixed
-_BOTH = tuple(f for f in _LATENCY if f in _QUALITY)                        # one column, both sides must agree
+_BOTH = tuple(f for f in _LATENCY_V2 if f in _QUALITY_V2)                  # one column, both sides must agree
 
 
 def _pair(lat, qual):
     "One joined dict from a latency row and a quality row of the same engine"
-    out = {'schema_version': lat['schema_version']}
+    if lat['schema_version'] != qual['schema_version']:
+        raise ValueError(f"latency row {lat['run_id']} is version {lat['schema_version']}, quality row {qual['run_id']} "
+                         f"version {qual['schema_version']}: `upgrade` the version-1 row before joining")
+    out, ver = {'schema_version': lat['schema_version']}, FIELDS_BY_VERSION[lat['schema_version']]
+    both = [f for f in _BOTH if f in ver['latency'] and f in ver['quality']]   # the shared columns of THIS version
     for side, r in (('latency', lat), ('quality', qual)):
         out |= {f'{side}_{f}': r.get(f) for f in _OWN}
-        out |= {f: r.get(f) for f in FIELDS[side] if f not in _SHARED and f not in _BOTH}
-    for f in _BOTH:
+        out |= {f: r.get(f) for f in ver[side] if f not in _SHARED and f not in both}
+    for f in both:
         a, b = lat.get(f), qual.get(f)
         if None not in (a, b) and a != b:
             raise ValueError(f"{f}: latency row {lat['run_id']} says {a!r}, quality row {qual['run_id']} {b!r}, same engine")
@@ -338,7 +411,9 @@ def to_parquet(
     for i, r in enumerate(rows):
         problems = validate(r)
         if problems: raise ValueError(f'row {i} refused: ' + '; '.join(problems))
-    fields = FIELDS[kinds[0]]
+    versions = sorted({r.get('schema_version') for r in rows})
+    if len(versions) != 1: raise ValueError(f'to_parquet writes one schema version per file, got {versions}: `upgrade` first')
+    fields = FIELDS_BY_VERSION[versions[0]][kinds[0]]
     schema = pa.schema([pa.field(k, getattr(pa, _ARROW[s['type']])(), nullable=not s['required']) for k, s in fields.items()])
     plain = [json.loads(_json(r)) for r in rows]   # numpy scalars become Python numbers
     table = [{k: _canonical(r[k]) if fields[k]['type'] is dict and r.get(k) is not None else r.get(k) for k in fields}

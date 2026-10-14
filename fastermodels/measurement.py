@@ -113,6 +113,8 @@ _SOURCE = ('measured', 'estimated', 'vendor_published')
 _LATENCY_V2 = {'task': _TASK, 'family': _FAMILY,
                **{k: v for k, v in _LATENCY.items() if k != 'latency_source'},
                'latency_source': dict(type=str, required=True, choices=_SOURCE),
+               'runtime': dict(type=str, required=True,       # + ST Edge AI (STM32N6 NPU)
+                               choices=('tensorrt', 'openvino', 'onnxruntime', 'hailo', 'axelera', 'stedgeai')),
                'power_w': dict(type=float, required=False, gt=0)}
 _QUALITY_V2 = {'task': _TASK, 'family': _FAMILY,
                **{k: v for k, v in _QUALITY.items() if k not in ('argmax_parity', 'parity_floor', 'ci_low', 'ci_high', 'ci_method')},

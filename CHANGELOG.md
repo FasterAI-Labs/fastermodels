@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `measurement` schema version 2 (`SCHEMA_VERSION = 2`, `SCHEMA_VERSIONS = (1, 2)`, `FIELDS_BY_VERSION`):
   `task` and `family` on both kinds; detection parity (`parity` + `parity_metric`: `argmax` or `box_iou90`,
   replacing `argmax_parity`); figures a vendor published (`latency_source` / `accuracy_source` =
-  `vendor_published`), well formed and never `VALID` as a measurement; `power_w`; the known `recipe` keys
+  `vendor_published`), well formed and never `VALID` as a measurement; `runtime` may be `stedgeai`; `power_w`; the known `recipe` keys
   checked for type (`RECIPE_KEYS`).
 - `upgrade(row, task, family=None)`: the version-2 row a version-1 row is.
 
